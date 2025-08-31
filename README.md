@@ -1,4 +1,4 @@
-# Accompanying Code for Master’s Thesis - Not-so-Great Expectations: Analyzing Gender, Genre and Reader Bias in Commercial Fiction Using Natural Language Processing
+# Accompanying Code for Master’s Thesis - Not-so-Great Expectations: Analyzing Gender, Genre and Reader Bias in Popular Fiction Using Computational Methods
 By Rocío Galeote
 
 # Project summary
