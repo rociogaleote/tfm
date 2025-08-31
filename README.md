@@ -19,10 +19,11 @@ For clarity, the code has been separated into different RMDs, depending on the s
 # List of dataset files and their description
 Due to intermediate API procedures, the original dataset as well as further versions are extracted into RData and CSV formats for review, if needed. Beware: the size of the datasets requires *extensive* memory usage in RStudio when incorporating the files into the environment.
 
--mystery_clean/ romance_clean: datasets after pre-processing
--mystery_final/ romance_final: datasets after data curation
--mystery_author_mentions/ romance_author_mentions: subset of mystery_final and romance_final for H2 and H3
+- mystery_clean/ romance_clean: datasets after pre-processing
+- mystery_final/ romance_final: datasets after data curation
+- mystery_author_mentions/ romance_author_mentions: subset of mystery_final and romance_final for H2 and H3
 
+Due to size constraints, all datasets can be found here: https://drive.google.com/drive/folders/1w8wFP_TfiGwVEsP--WU6R42xoTmAdHlt?usp=sharing. For inquiries or errors downloading said datasets, please contact 100431024@alumnos.uc3m.es
 
 # Disclaimer
 This project was developed exclusively for academic purposes as part of my final thesis for the Masters Degree in Computational Social Science at Carlos III University. The code and materials provided are intended for research and educational use only. Commercial use is strictly prohibited. For permissions or inquiries, please contact the administrator.
