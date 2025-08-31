@@ -6,9 +6,9 @@ By Rocío Galeote
 This paper investigates the presence and nature of gender bias in the reception of books in Mystery and Romance genres, analyzing how author gender influences reader evaluations in online book reviews. The primary data source for this analysis are two datasets scraped by Mengting Wan and Julian McAuley in late 2017, extracted from publicly available reviews and book metadata. 
 Focusing on the said two genres, this study examines whether an author's gender systematically affects the ratings, descriptive language, and overall sentiment of reviews. Three specific hypotheses are tested: 
 
-(H1) that author gender influences book review ratings
-(H2) that author mentions and the adjectives used to describe them in book reviews differ significantly across genders
-(H3) that holding review rating constant, reviews of male-authored and female-authored books have different sentiment scores 
+* (H1) that author gender influences book review ratings
+* (H2) that author mentions and the adjectives used to describe them in book reviews differ significantly across genders
+* (H3) that holding review rating constant, reviews of male-authored and female-authored books have different sentiment scores 
 
 By employing a multi-faceted approach that combines quantitative rating analysis with natural language processing of review content, this research aims to explore whether gender bias exists in how readers perceive and engage with novels across different fiction genres and assess whether the gender of an author influences how their books are rated and reviewed, especially in literary genres hegemonically associated with the opposite gender.The findings are expected to contribute to a deeper understanding of how gender stereotypes shape literary evaluation and reader engagement in the digital age.
 
