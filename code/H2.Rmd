@@ -1,0 +1,346 @@
+---
+title: "Not-So-Great-Expectations. Code for H2 testing"
+author: "Rocío Galeote"
+date: "2025-08-11"
+output: html_document
+---
+
+## Hypothesis 2 testing:
+
+NOTE: This rmd serves as Part 4 of the accompanying code for the thesis "Not-so-Great Expectations: Analyzing Gender, Genre and Reader Bias in Commercial Fiction Using Natural Language Processing".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(sentimentr)
+library(rcompanion)
+```
+
+
+We create a dataset with only those reviews that include the authors name or the words "author" or "writer".
+
+```{r}
+
+# Helper to safely escape regex special characters
+escape_regex <- function(x) {
+  str_replace_all(x, "([.|()\\^{}+$*?]|\\[|\\])", "\\\\\\1")
+}
+
+# Create a new dataset with author mentions or keywords
+mystery_author_mentions <- mystery_final %>%
+  mutate(
+    author_first = word(author, 1),
+    author_last = word(author, -1),
+    # Escape names for regex use
+    author_first_clean = escape_regex(str_to_lower(author_first)),
+    author_last_clean = escape_regex(str_to_lower(author_last))
+  ) %>%
+  filter(
+    str_detect(str_to_lower(review_text), "\\bauthor\\b") |
+    str_detect(str_to_lower(review_text), "\\bwriter\\b") |
+    str_detect(str_to_lower(review_text), author_first_clean) |
+    str_detect(str_to_lower(review_text), author_last_clean)
+  )
+
+# View result count
+cat("📝 Total reviews mentioning the author or writer:", nrow(mystery_author_mentions), "\n")
+
+# Preview a few rows
+head(mystery_author_mentions %>% select(review_id, author, review_text), 5)
+
+
+# Check gender distribution of the reviews that mention the author or writer
+mystery_author_mentions %>%
+  count(gender) %>%
+  mutate(percentage = round(n / sum(n) * 100, 2)) %>%
+  arrange(desc(n))
+
+
+# Count unique authors per gender
+mystery_author_mentions %>%
+  distinct(author, gender) %>%
+  count(gender)
+
+# Create a new dataset with author mentions or keywords
+romance_author_mentions <- romance_final %>%
+  mutate(
+    author_first = word(author, 1),
+    author_last = word(author, -1),
+    # Escape names for regex use
+    author_first_clean = escape_regex(str_to_lower(author_first)),
+    author_last_clean = escape_regex(str_to_lower(author_last))
+  ) %>%
+  filter(
+    str_detect(str_to_lower(review_text), "\\bauthor\\b") |
+    str_detect(str_to_lower(review_text), "\\bwriter\\b") |
+    str_detect(str_to_lower(review_text), author_first_clean) |
+    str_detect(str_to_lower(review_text), author_last_clean)
+  )
+
+# View result count
+cat("📝 Total reviews mentioning the author or writer:", nrow(mystery_author_mentions), "\n")
+
+# Preview a few rows
+head(romance_author_mentions %>% select(review_id, author, review_text), 5)
+
+
+# Check gender distribution of the reviews that mention the author or writer
+romance_author_mentions %>%
+  count(gender) %>%
+  mutate(percentage = round(n / sum(n) * 100, 2)) %>%
+  arrange(desc(n))
+
+# Count unique authors per gender
+romance_author_mentions %>%
+  distinct(author, gender) %>%
+  count(gender)
+
+
+# Combine gender counts for both datasets, including unknown or NA
+author_mentions_summary <- bind_rows(
+  mystery_author_mentions %>%
+    mutate(gender = if_else(is.na(gender), "unknown", gender)) %>%
+    count(dataset = "Mystery", gender, name = "count"),
+
+  romance_author_mentions %>%
+    mutate(gender = if_else(is.na(gender), "unknown", gender)) %>%
+    count(dataset = "Romance", gender, name = "count")
+) %>%
+  group_by(dataset) %>%
+  mutate(
+    total_mentions = sum(count),
+    percentage = round(100 * count / total_mentions, 2)
+  ) %>%
+  ungroup()
+
+# Pivot wider to create a table with counts and percentages
+author_mentions_table <- author_mentions_summary %>%
+  pivot_wider(
+    id_cols = dataset,
+    names_from = gender,
+    values_from = c(count, percentage),
+    values_fill = 0
+  ) %>%
+  relocate(starts_with("count"), .after = dataset) %>%
+  mutate(
+    total_mentions = count_female + count_male + count_unknown
+  )
+
+# View final table
+print(author_mentions_table)
+
+```
+
+
+
+Then, we create a function to extract the desired adjectives:
+
+```{r}
+
+extract_adj_dependent_udpipe <- function(parsed, first_name, last_name) {
+  if (is.null(parsed) || nrow(parsed) == 0) return(NA_character_)
+  
+  library(dplyr)
+  target_tokens <- tolower(c(first_name, last_name, paste(first_name, last_name), "author", "writer"))
+  
+  # Find token ids of author references (NOUN or PROPN)
+  author_token_ids <- parsed %>%
+    filter(tolower(token) %in% target_tokens,
+           upos %in% c("PROPN", "NOUN")) %>%
+    pull(token_id)
+  
+  if (length(author_token_ids) == 0) return(NA_character_)
+  
+  adj_modifiers <- c()
+  
+  for (idx in author_token_ids) {
+    # Find adjectives that *directly* modify the author token (amod or acl relations)
+    adjs <- parsed %>%
+      filter(head_token_id == idx,
+             upos == "ADJ",
+             !grepl("NumType=Ord", feats),
+             dep_rel %in% c("amod", "acl")) %>%
+      pull(token)
+    
+    # Find negations attached to these adjectives (neg relation)
+    neg_adjs <- parsed %>%
+      filter(dep_rel == "neg",
+             head_token_id %in% (parsed %>% 
+                                  filter(head_token_id == idx, upos == "ADJ") %>% 
+                                  pull(token_id))) %>%
+      pull(head_token_id)
+    
+    # Add negated adjectives with "not"
+    negated_adjs <- parsed %>%
+      filter(token_id %in% neg_adjs) %>%
+      pull(token)
+    if (length(negated_adjs) > 0) {
+      adj_modifiers <- c(adj_modifiers, paste("not", negated_adjs))
+    }
+    
+    # Add normal adjectives
+    adj_modifiers <- c(adj_modifiers, adjs)
+  }
+  
+  if (length(adj_modifiers) == 0) return(NA_character_)
+  return(paste(unique(adj_modifiers), collapse = "; "))
+}
+  
+
+mystery_author_mentions <- mystery_author_mentions %>%
+  rowwise() %>%
+  mutate(author_adjectives_ud = extract_adj_dependent_udpipe(udpipe_df, first_name, last_name)) %>%
+  ungroup() %>%
+  relocate(author_adjectives_ud, .after = udpipe_df)
+
+
+romance_author_mentions <- romance_author_mentions %>%
+  rowwise() %>%
+  mutate(author_adjectives_ud = extract_adj_dependent_udpipe(udpipe_df, first_name, last_name)) %>%
+  ungroup() %>%
+  relocate(author_adjectives_ud, .after = udpipe_df)
+```
+
+List to see some of them along with the author gender and name:
+
+```{r}
+
+# Create the adjective list for the mystery genre
+mystery_adjective_list <- mystery_author_mentions %>%
+  # Select the necessary columns
+  select(author, gender, author_adjectives_ud) %>%
+  
+  # Remove rows where no adjectives were found
+  filter(!is.na(author_adjectives_ud)) %>%
+  
+  # Split the adjective strings into separate rows
+  separate_rows(author_adjectives_ud, sep = "; ") %>%
+  
+  # Rename for clarity
+  rename(
+    adjective = author_adjectives_ud,
+    gender = gender,
+    author = author
+  ) %>%
+  
+  # Clean up whitespace
+  mutate(adjective = trimws(adjective))
+
+# View the result for the mystery genre
+print(mystery_adjective_list)
+```
+
+```{r}
+# Create the adjective list for the romance genre
+romance_adjective_list <- romance_author_mentions %>%
+  # Select the necessary columns
+  select(author, gender, author_adjectives_ud) %>%
+  
+  # Remove rows where no adjectives were found
+  filter(!is.na(author_adjectives_ud)) %>%
+  
+  # Split the adjective strings into separate rows
+  separate_rows(author_adjectives_ud, sep = "; ") %>%
+  
+  # Rename for clarity
+  rename(
+    adjective = author_adjectives_ud,
+    gender = gender,
+    author = author
+  ) %>%
+  
+  # Clean up whitespace
+  mutate(adjective = trimws(adjective))
+
+# View the result for the romance genre
+print(romance_adjective_list)
+
+write.csv(romance_adjective_list, "romance_adjective_list.csv", row.names = FALSE)
+write.csv(mystery_adjective_list, "mystery_adjective_list.csv", row.names = FALSE)
+
+```
+
+
+Now we combine both lists and use sentimentr to create a dataframe with positive, negative and neutral adjectives across genders and genres.
+
+
+```{r}
+
+# Combine two lists into a single data frame
+all_adjectives <- bind_rows(
+  list(Mystery = mystery_adjective_list, Romance = romance_adjective_list),
+  .id = "genre"
+)
+
+write.csv(all_adjectives, "all_adjectives_list.csv", row.names = FALSE)
+
+# Create the detailed summary, grouping by both genre and gender
+detailed_summary <- all_adjectives %>%
+  mutate(sentiment_score = sentiment(adjective)$sentiment) %>%
+  mutate(sentiment = case_when(
+    sentiment_score > 0  ~ "positive",
+    sentiment_score < 0  ~ "negative",
+    sentiment_score == 0 ~ "neutral"
+  )) %>%
+  
+  # The key change is here: group by both variables
+  count(genre, gender, sentiment) %>%
+  
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = list(n = 0))
+
+# View the detailed summary table
+print(detailed_summary)
+```
+
+Take unique adjectives and remove duplicates for manual revision:
+
+```{r}
+# Select unique values from the adjective column
+unique_adjectives <- unique(all_adjectives$adjective)
+
+# Convert to a data frame for CSV export
+df_unique <- data.frame(adjective = unique_adjectives)
+
+# Write to CSV
+write.csv(df_unique, "unique_adjectives.csv", row.names = FALSE)
+```
+
+
+Contingency table for chi-squared test:
+
+```{r}
+
+# We unite 'genre' and 'gender' to create unique row names for the test table.
+overall_contingency_table <- detailed_summary %>%
+  ungroup() %>% # Ungroup to ensure unite works as expected
+  unite("group", genre, gender, sep = "_") %>% # Combine genre and gender
+  tibble::column_to_rownames("group") %>%      # Set the new 'group' as row names
+  as.matrix()                                  # Convert to a matrix
+
+# Let's view the final contingency table
+print(overall_contingency_table)
+
+
+# 2. Run the Chi-squared test on this overall table
+overall_chi_test_result <- chisq.test(overall_contingency_table)
+
+# 3. Print the results
+print(overall_chi_test_result)
+```
+There is a significant relationship between both variables (the genre-gender groups and the sentiment categories). The way sentiments are distributed is dependent on the group. To see which specific groups and sentiments are driving this difference, we compute the standard residuals:
+
+```{r}
+overall_chi_test_result$stdres
+```
+And the Cramer's V to test effect sizes:
+
+```{r}
+cramerV(overall_contingency_table)
+```
+
+Cramer's V finally indicates a weak association, much like H1 results.

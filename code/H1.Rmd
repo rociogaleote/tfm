@@ -1,0 +1,299 @@
+---
+title: "Not-So-Great-Expectations. Code for H1 testing"
+author: "Rocío Galeote"
+date: "2025-08-30"
+output: html_document
+---
+
+## Hypothesis 1 testing
+
+NOTE: This rmd serves as Part 3 of the accompanying code for the thesis "Not-so-Great Expectations: Analyzing Gender, Genre and Reader Bias in Commercial Fiction Using Natural Language Processing".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval =FALSE)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(patchwork)
+library(showtext)
+library(rcompanion)
+```
+
+Load the files:
+
+```{r}
+
+load("mysteryfinal.RData")
+load("romancefinal.RData")
+
+mystery_final <- mysteryfinal
+romance_final <- romancefinal
+
+```
+
+
+### H1: rating
+
+We now check review rating by gender
+
+```{r}
+
+# Prepare proportion data for MYSTERY
+mystery_prop <- mystery_final %>%
+  filter(!is.na(gender), !is.na(review_rating)) %>%
+  group_by(gender, review_rating) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(gender) %>%
+  mutate(proportion = count / sum(count))
+
+# Prepare proportion data for ROMANCE
+romance_prop <- romance_final %>%
+  filter(!is.na(gender), !is.na(review_rating)) %>%
+  group_by(gender, review_rating) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(gender) %>%
+  mutate(proportion = count / sum(count))
+
+```
+
+
+```{r}
+
+gender_colors <- c("male" = "#1f77b4", "female" = "#e377c2", "unknown" = "#7f7f7f")
+
+theme_paper <- theme_minimal(base_family = "serif", base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+# MYSTERY Bar Plot
+mystery_bar <- ggplot(mystery_prop, aes(x = as.factor(review_rating), y = proportion, fill = gender)) +
+  geom_bar(stat = "identity", position = "dodge", color = "white", width = 0.7) +
+  scale_fill_manual(values = gender_colors) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Mystery's proportion of review ratings by gender",
+    x = "Review Rating",
+    y = "Proportion",
+    fill = "Gender"
+  ) +
+  theme_paper
+
+# ROMANCE Bar Plot
+romance_bar <- ggplot(romance_prop, aes(x = as.factor(review_rating), y = proportion, fill = gender)) +
+  geom_bar(stat = "identity", position = "dodge", color = "white", width = 0.7) +
+  scale_fill_manual(values = gender_colors) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Romance's proportion of review ratings by gender",
+    x = "Review Rating",
+    y = "Proportion",
+    fill = "Gender"
+  ) +
+  theme_paper
+
+# Combine
+bar_combined <- mystery_bar + romance_bar + plot_layout(ncol = 2, guides = "collect") & theme(legend.position = "bottom")
+bar_combined
+ggsave("figure_barplots.png", bar_combined, width = 10, height = 5, dpi = 300)
+
+# MYSTERY Boxplot
+mystery_box <- ggplot(mystery_final, aes(x = gender, y = review_rating, fill = gender)) +
+  geom_boxplot(outlier.shape = NA, width = 0.6) +
+  geom_jitter(width = 0.2, alpha = 0.3, color = "black", size = 0.8) +
+  scale_fill_manual(values = gender_colors) +
+  labs(
+    title = "Mystery",
+    x = "Gender",
+    y = "Review Rating"
+  ) +
+  theme_paper +
+  theme(legend.position = "none")
+
+# ROMANCE Boxplot
+romance_box <- ggplot(romance_final, aes(x = gender, y = review_rating, fill = gender)) +
+  geom_boxplot(outlier.shape = NA, width = 0.6) +
+  geom_jitter(width = 0.2, alpha = 0.3, color = "black", size = 0.8) +
+  scale_fill_manual(values = gender_colors) +
+  labs(
+    title = "Romance",
+    x = "Gender",
+    y = "Review Rating"
+  ) +
+  theme_paper +
+  theme(legend.position = "none")
+
+# Combine
+box_combined <- mystery_box + romance_box + plot_layout(ncol = 2)
+box_combined
+
+ggsave("figure_boxplots.png", box_combined, width = 10, height = 5, dpi = 300)
+
+
+```
+
+Normality check:
+
+```{r}
+library(patchwork)
+
+# QQ plot for Mystery
+
+qqm <- ggplot(mystery_final, aes(sample = review_rating)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  facet_wrap(~ gender) +
+  theme_paper +
+  labs(title = "Mystery Ratings - QQ Plot")
+
+
+ggsave(filename= "mysteryqqplot.jpeg", plot= qqm)
+
+
+# QQ plot for Romance
+
+qqr<- ggplot(romance_final, aes(sample = review_rating)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  facet_wrap(~ gender) +
+  theme_paper +
+  labs(title = "Romance Ratings - QQ Plot")
+
+ggsave(filename= "romanceqqplot.jpeg", plot= qqr)
+
+# Combine side by side
+combinedqq <- qqm + qqr + plot_layout(ncol = 2)
+
+# Save combined image
+ggsave("combined_qqplots.jpeg", plot = combinedqq, width = 12, height = 6)
+
+```
+
+QQ plots show “S” shaped patterns, suggesting skewness and departure from normality. None of the groups appear normally distributed.
+
+Average ratings:
+
+```{r}
+# Mystery
+mystery_avg_ratings <- mystery_final %>%
+  group_by(gender) %>%
+  summarise(average_rating = mean(review_rating, na.rm = TRUE)) %>%
+  mutate(genre = "Mystery") # Add genre column to the summary table
+
+# Romance
+romance_avg_ratings <- romance_final %>%
+  group_by(gender) %>%
+  summarise(average_rating = mean(review_rating, na.rm = TRUE)) %>%
+  mutate(genre = "Romance") # Add genre column to the summary table
+
+# Combine the two summary tables
+average_ratings <- rbind(mystery_avg_ratings, romance_avg_ratings)
+
+# Reorder columns for better readability
+average_ratings <- average_ratings[, c("genre", "gender", "average_rating")]
+
+# Print the resulting table
+print(average_ratings)
+
+```
+
+
+Chi-squared to see if differences are statistically significant:
+
+```{r}
+# Contingency table for Mystery
+mystery_table <- mystery_final %>%
+  filter(!is.na(gender), !is.na(review_rating)) %>%
+  count(gender, review_rating) %>%
+  pivot_wider(names_from = review_rating, values_from = n, values_fill = 0) %>%
+  column_to_rownames("gender") %>%
+  as.matrix()
+
+# Chi-squared test for Mystery
+mystery_chi <- chisq.test(mystery_table)
+print(mystery_chi)
+
+# Contingency table for Romance
+romance_table <- romance_final %>%
+  filter(!is.na(gender), !is.na(review_rating)) %>%
+  count(gender, review_rating) %>%
+  pivot_wider(names_from = review_rating, values_from = n, values_fill = 0) %>%
+  column_to_rownames("gender") %>%
+  as.matrix()
+
+# Chi-squared test for Romance
+romance_chi <- chisq.test(romance_table)
+print(romance_chi)
+```
+
+
+The Chi-squared test examines whether the distribution of ratings differs between genders more than we'd expect by chance. The p-value < 2.2e-16 is extremely small, much smaller than any common significance level, so there is a **statistically significant** difference in how different genders rate books in both the Mystery and Romance genres.
+
+We further analyze effect sizes with Cramér’s V to measure the strength of the association:
+
+```{r}
+
+# For Mystery
+cramerV(mystery_table)
+
+# For Romance
+cramerV(romance_table)
+
+```
+
+Mystery Cramér’s V = 0.025. Even though the Chi-squared test showed a statistically significant difference (p < 2.2e-16), the effect size is tiny: gender explains very little of the variation in review ratings. Thus, the difference is not practically significant, despite being statistically significant.
+
+Romance Cramér’s V = 0.045. Still weak, slightly higher than Mystery, but minimal. Like above, the result is statistically significant, but the practical significance is low.
+
+Although statistically significant differences were found in review ratings by gender for both genres, but the effect sizes are so small that they are unlikely to be meaningful in practice.
+
+However, this is all considering ratings as a categorical variable, we now try with an ordinal consideration, with Kruskal-Wallis:
+
+```{r}
+
+# Kruskal-Wallis test for Mystery
+mystery_kw <- mystery_final %>%
+  filter(!is.na(gender), !is.na(review_rating)) %>%
+  kruskal.test(review_rating ~ gender, data = .)
+
+print(mystery_kw)
+
+# Kruskal-Wallis test for Romance
+romance_kw <- romance_final %>%
+  filter(!is.na(gender), !is.na(review_rating)) %>%
+  kruskal.test(review_rating ~ gender, data = .)
+
+print(romance_kw)
+
+```
+
+For Mystery:
+Kruskal-Wallis chi-squared = 235.42, df = 2, p-value < 2.2e-16
+
+
+For Romance:
+Kruskal-Wallis chi-squared = 1217.7, df = 2, p-value < 2.2e-16
+
+In both genres, the gender of the author is associated with different rating patterns. The effect is much stronger in Romance (χ² ≈ 1218 vs. 235 in Mystery).
+
+Then, we run pairwise Wilcoxon tests to find which gender pairs are significantly different:
+
+```{r}
+pairwise.wilcox.test(mystery_final$review_rating, mystery_final$gender, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(romance_final$review_rating, romance_final$gender, p.adjust.method = "bonferroni")
+
+```
+
+
+For both Mystery and Romance, ratings vary systematically by author gender. Romance in particular shows especially strong divergence across genders.
+
+
+

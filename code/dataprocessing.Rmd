@@ -1,0 +1,829 @@
+---
+title: "Not-So-Great-Expectations. Code for data preprocessing"
+author: "Rocío Galeote"
+date: "2025-03-31"
+output: html_document
+---
+
+## Data processing
+
+NOTE: This rmd serves as Part 1 of the accompanying code for the thesis "Not-so-Great Expectations: Analyzing Gender, Genre and Reader Bias in Commercial Fiction Using Natural Language Processing".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/goodreads.gz"
+output_file <- "goodreads.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+library(tidyverse)
+
+# Define file path
+goodreadscsv <- "goodreads.csv"
+
+# Read CSV as a tibble
+goodreads <- read_csv(goodreadscsv)
+
+# Print summary
+summary(goodreadscsv)
+
+
+```
+
+
+
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/goodreads2.gz"
+output_file <- "goodreads2.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+library(tidyverse)
+
+# Define file path
+goodreads2csv <- "goodreads2.csv"
+
+# Read CSV as a tibble
+goodreads2 <- read_csv(goodreads2csv)
+
+# Print summary
+summary(goodreads2csv)
+
+
+```
+
+
+
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/goodreads3.gz"
+output_file <- "goodreads3.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+library(tidyverse)
+
+# Define file path
+reviews <- "goodreads3.csv"
+
+# Read CSV as a tibble
+reviews <- read_csv(goodreads3csv)
+
+# Print summary
+summary(reviews)
+
+
+```
+
+user_id,book_id,review_id,rating,review_text,date_added,date_updated,read_at,started_at,n_votes,n_comments
+
+Data cleaning:
+
+```{r}
+library(dplyr)
+
+goodreads_clean <- goodreads3 |> 
+  select(-date_added, -date_updated, -read_at, -started_at)
+```
+
+
+Data about books
+
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/goodreadsbooks.gz"
+output_file <- "goodreadsbooks.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+library(tidyverse)
+
+# Define file path
+goodreadsbooks <- "goodreadsbooks.csv"
+
+# Read CSV as a tibble
+goodreadsbooks <- read_csv(goodreadsbooks)
+
+# Print summary
+summary(goodreadsbooks)
+
+
+```
+
+Cleaning books:
+
+```{r}
+books <- goodreadsbooks |> 
+  select(-default_description_language_code, -default_chaptering_book_id, -original_publication_day, -original_publication_month, -original_language_id)
+
+summary(books)
+```
+
+
+
+```{r}
+library(dplyr)
+
+# Count NAs in each column
+na_counts <- goodreadsbooks %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  t()  # Transpose for better readability
+
+# Convert to a tibble for a clean output
+na_summary <- tibble(Variable = rownames(na_counts), Missing_Values = as.vector(na_counts))
+
+# Print the summary
+print(na_summary)
+```
+
+
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/goodreadsauthors.gz"
+output_file <- "goodreadsauthors.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+library(tidyverse)
+
+# Define file path
+authors <- "goodreadsauthors.csv"
+
+# Read CSV as a tibble
+authors <- read_csv(authors)
+
+# Print summary
+summary(authors)
+
+
+```
+
+Mystery dataset
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/mystery.gz"
+output_file <- "mystery.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+library(tidyverse)
+
+# Define file path
+mystery <- "mystery.csv"
+
+# Read CSV as a tibble
+mystery <- read_csv(mystery)
+
+# Print summary
+summary(mystery)
+
+
+```
+
+Cleaning mystery:
+
+```{r}
+mystery <- mystery |> 
+  select(-date_added, -date_updated, -read_at, -started_at)
+
+summary(mystery)
+```
+
+
+
+Romance reviews
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/romancereviews.gz"
+output_file <- "romancereviews.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+```
+
+Romance books info:
+
+```{r}
+
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+
+# Define the file path
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/romancebooks.gz"
+output_file <- "romancebooks_cleaned.csv"
+
+# Open the gz file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks of data
+json_data <- list()
+
+# Set chunk size (adjustable based on memory capacity)
+chunk_size <- 10000  # Process 10,000 lines at a time
+counter <- 0
+
+# Process the file in chunks
+while (length(lines <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  chunk_data <- lapply(lines, function(x) tryCatch(fromJSON(x), error = function(e) NULL))
+  
+  # Remove any invalid entries (NULL)
+  chunk_data <- chunk_data[!sapply(chunk_data, is.null)]
+  
+  # Store the parsed data in the json_data list
+  json_data <- append(json_data, chunk_data)
+  
+  # Track progress
+  counter <- counter + length(lines)
+  cat("Processed", counter, "lines...\n")
+}
+
+# Close the connection
+close(con)
+
+# Convert the collected data to a dataframe
+df <- bind_rows(lapply(json_data, function(x) {
+  tibble(
+    book_id = x$book_id,
+    work_id = x$work_id,
+    title = x$title,
+    title_without_series = x$title_without_series,
+    average_rating = as.numeric(x$average_rating),
+    ratings_count = as.numeric(x$ratings_count),
+    text_reviews_count = as.numeric(x$text_reviews_count),
+    num_pages = as.numeric(x$num_pages),
+    publication_year = as.numeric(x$publication_year),
+    publication_month = as.numeric(x$publication_month),
+    publication_day = as.numeric(x$publication_day),
+    language_code = x$language_code,
+    isbn = x$isbn,
+    isbn13 = x$isbn13,
+    asin = x$asin,
+    kindle_asin = x$kindle_asin,
+    publisher = x$publisher,
+    format = x$format,
+    description = x$description,
+    is_ebook = x$is_ebook,
+    link = x$link,
+    url = x$url,
+    image_url = x$image_url,
+    similar_books = paste(x$similar_books, collapse = ", "),  # Convert list to a string
+    authors = paste(x$authors$author_id, collapse = ", "),  # Extract author IDs as comma-separated string
+    popular_shelves = paste(x$popular_shelves$name, collapse = ", ")  # Extract shelf names
+  )
+}))
+
+# Show summary of the final dataset
+summary(df)
+
+library(tidyverse)
+# Save the cleaned dataset as a CSV
+write_csv(df, output_file)
+cat("Saved cleaned dataset as", output_file, "\n")
+
+
+```
+
+
+Mystery reviews:
+
+```{r}
+
+library(jsonlite)
+library(data.table)
+
+# Define file paths
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/mysteryreviews.gz"
+output_file <- "mysteryreviews.csv"
+
+# Open the compressed file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks
+data_list <- list()
+chunk_size <- 10000  # Adjust this based on memory (10,000 lines per chunk)
+
+counter <- 0
+while (length(line <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  json_objects <- lapply(line, fromJSON)
+  
+  # Convert to data.table for efficient processing
+  df <- rbindlist(json_objects, fill = TRUE)
+  
+  # Write to CSV in append mode (efficient for large files)
+  fwrite(df, output_file, append = TRUE, col.names = (counter == 0))
+  
+  counter <- counter + 1
+  cat("Processed", counter * chunk_size, "lines...\n")
+}
+
+# Close the file connection
+close(con)
+
+cat("Conversion complete! CSV saved as", output_file)
+
+library(tidyverse)
+
+# Define file path
+mystery <- "mystery.csv"
+
+# Read CSV as a tibble
+mystery <- read_csv(mystery)
+
+# Print summary
+summary(mystery)
+
+```
+
+
+Mystery books info:
+
+```{r}
+
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+
+# Define the file path
+input_file <- "C:/Users/rochi/Documents/UNIVERSIDAD/MASTER/TFM/mysterybooks.gz"
+output_file <- "mysterybooks_cleaned.csv"
+
+# Open the gz file for reading
+con <- gzfile(input_file, "rt")
+
+# Initialize an empty list to store chunks of data
+json_data <- list()
+
+# Set chunk size (adjustable based on memory capacity)
+chunk_size <- 10000  # Process 10,000 lines at a time
+counter <- 0
+
+# Process the file in chunks
+while (length(lines <- readLines(con, n = chunk_size, warn = FALSE)) > 0) {
+  # Parse each line as JSON
+  chunk_data <- lapply(lines, function(x) tryCatch(fromJSON(x), error = function(e) NULL))
+  
+  # Remove any invalid entries (NULL)
+  chunk_data <- chunk_data[!sapply(chunk_data, is.null)]
+  
+  # Store the parsed data in the json_data list
+  json_data <- append(json_data, chunk_data)
+  
+  # Track progress
+  counter <- counter + length(lines)
+  cat("Processed", counter, "lines...\n")
+}
+
+# Close the connection
+close(con)
+
+# Convert the collected data to a dataframe
+df <- bind_rows(lapply(json_data, function(x) {
+  tibble(
+    book_id = x$book_id,
+    work_id = x$work_id,
+    title = x$title,
+    title_without_series = x$title_without_series,
+    average_rating = as.numeric(x$average_rating),
+    ratings_count = as.numeric(x$ratings_count),
+    text_reviews_count = as.numeric(x$text_reviews_count),
+    num_pages = as.numeric(x$num_pages),
+    publication_year = as.numeric(x$publication_year),
+    publication_month = as.numeric(x$publication_month),
+    publication_day = as.numeric(x$publication_day),
+    language_code = x$language_code,
+    isbn = x$isbn,
+    isbn13 = x$isbn13,
+    asin = x$asin,
+    kindle_asin = x$kindle_asin,
+    publisher = x$publisher,
+    format = x$format,
+    description = x$description,
+    is_ebook = x$is_ebook,
+    link = x$link,
+    url = x$url,
+    image_url = x$image_url,
+    similar_books = paste(x$similar_books, collapse = ", "),  # Convert list to a string
+    authors = paste(x$authors$author_id, collapse = ", "),  # Extract author IDs as comma-separated string
+    popular_shelves = paste(x$popular_shelves$name, collapse = ", ")  # Extract shelf names
+  )
+}))
+
+# Show summary of the final dataset
+summary(df)
+
+library(tidyverse)
+# Save the cleaned dataset as a CSV
+write_csv(df, output_file)
+cat("Saved cleaned dataset as", output_file, "\n")
+
+
+```
+
+Reading the files
+
+
+```{r}
+
+
+library(tidyverse)
+
+# ROMANCE REVIEWS
+
+romancereviews <- "romancereviews.csv"
+romancereviews <- read_csv(romancereviews)
+summary(romancereviews)
+
+# ROMANCEBOOKS
+romancebooks <- "romancebooks_cleaned.csv"
+romancebooks <- read_csv(romancebooks)
+summary(romancebooks)
+
+#MYSTERY REVIEWS
+mysteryreviews <- "mysteryreviews.csv"
+mysteryreviews <- read_csv(mysteryreviews)
+summary(mysteryreviews)
+
+#MYSTERY BOOKS
+mysterybooks <- "mysterybooks_cleaned.csv"
+mysterybooks <- read_csv(mysterybooks)
+summary(mysterybooks)
+
+```
+
+Cleaning:
+
+```{r}
+
+library(dplyr)
+
+mysteryreviews <- mysteryreviews |> 
+  select(-date_added, -date_updated, -read_at, -started_at)
+
+romancereviews <- romancereviews |> 
+  select(-date_added, -date_updated, -read_at, -started_at)
+
+mysterybooks <- mysterybooks |> 
+  select(-publication_year, -publication_month, -publication_day, -asin, -kindle_asin, -format)
+
+romancebooks <- romancebooks |> 
+  select(-publication_year, -publication_month, -publication_day, -asin, -kindle_asin, -format)
+
+
+
+# Keep only rows where language_code starts with "en"
+mysterybooks_en <- mysterybooks %>%
+  filter(grepl("^en(-|$)", language_code))
+
+# Check result
+unique(mysterybooks_en$language_code)
+
+# Keep only rows where language_code starts with "en"
+romancebooks_en <- romancebooks %>%
+  filter(grepl("^en(-|$)", language_code))
+
+# Check result
+unique(romancebooks_en$language_code)
+
+write_csv(romancebooks_en, "romancebooks_en.csv")
+write_csv(mysterybooks_en, "mysterybooks_en.csv")
+
+```
+
+
+Saving workspace
+
+```{r}
+
+save(romancebooks, file = "romancebooks.RData")
+save(romancereviews, file = "romancereviews.RData")
+save(mysterybooks, file = "mysterybooks.RData")
+save(mysteryreviews, file = "mysteryreviews.RData")
+
+```
+
+
+Merging
+
+```{r}
+
+# Left join: keep all reviews, even if the book info is missing
+mystery_combined <- left_join(mysteryreviews, mysterybooks_en, by = "book_id")
+
+# Left join: keep all reviews, even if the book info is missing
+romance_combined <- left_join(romancereviews, romancebooks_en, by = "book_id")
+
+```
+
+NAs
+
+```{r}
+
+colSums(is.na(mystery_combined))
+colSums(is.na(romance_combined))
+
+
+library(dplyr)
+
+# For mystery_combined
+mystery <- mystery_combined |> 
+  filter(!is.na(title))
+
+# For romance_combined
+romance <- romance_combined |> 
+  filter(!is.na(title))
+
+write_csv(romance, "romance.csv")
+write_csv(mystery, "mystery.csv")
+
+```
+
+Add authors:
+
+```{r}
+
+authors <- "./2/goodreadsauthors.csv"
+authors <- read_csv(authors)
+summary(authors)
+
+# How many author IDs in 'mystery' are found in 'authors'?
+sum(mystery$authors %in% authors$author_id)
+
+# What proportion of author IDs from 'mystery' exist in 'authors'?
+mean(mystery$authors %in% authors$author_id)
+
+mystery$authors <- as.character(mystery$authors)
+authors$author_id <- as.character(authors$author_id)
+romance$authors <- as.character(romance$authors)
+
+library(dplyr)
+
+mysteryaut <- left_join(mystery, authors, by = c("authors" = "author_id"))
+romanceaut <- left_join(romance, authors, by = c("authors" = "author_id"))
+
+```
+
+Final cleaning:
+
+```{r}
+library(dplyr)
+
+# Create a cleaned version of mysteryaut
+mystery_clean <- mysteryaut %>%
+  transmute(
+    title = title,
+    title_without_series = title_without_series,
+    author = name,                    # Rename 'name' to 'autor'
+    description = description,
+    pages = num_pages,              # Rename 'num_pages' to 'pages'
+    language_code = language_code,
+    review_id = review_id,
+    review_rating = rating,         # Rename 'rating' to 'review_rating'
+    review_text = review_text
+  )
+
+# Preview the result
+glimpse(mystery_clean)
+
+
+library(dplyr)
+
+
+romance_clean <- romanceaut %>%
+  transmute(
+    title = title,
+    title_without_series = title_without_series,
+    author = name,                    # Rename 'name' to 'autor'
+    description = description,
+    pages = num_pages,              # Rename 'num_pages' to 'pages'
+    language_code = language_code,
+    review_id = review_id,
+    review_rating = rating,         # Rename 'rating' to 'review_rating'
+    review_text = review_text
+  )
+
+# Preview the result
+glimpse(romance_clean)
+
+write_csv(romance_clean, "romancefin.csv")
+write_csv(mystery_clean, "mysteryfin.csv")
+
+```
+

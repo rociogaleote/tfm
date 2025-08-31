@@ -1,0 +1,591 @@
+---
+title: "Not-So-Great-Expectations. Code for H3 testing"
+author: "Rocío Galeote"
+date: "2025-08-31"
+output: html_document
+---
+
+## Hypothesis 3 testing
+
+NOTE: This rmd serves as Part 5 of the accompanying code for the thesis "Not-so-Great Expectations: Analyzing Gender, Genre and Reader Bias in Commercial Fiction Using Natural Language Processing".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval= FALSE)
+```
+
+
+```{r}
+
+library(sentimentr)
+library(dplyr)
+library(MASS)        # polr (ordinal logistic regression)
+library(lme4)        # lmer (linear mixed models)
+library(ordinal)     # clmm (ordinal mixed models)
+library(rsample)
+library(stargazer)
+library(webshot2)
+library(htmltools)
+library(ggplot2)
+library(texreg)
+library(pscl)
+library(lmtest)       # Breusch–Pagan
+library(car)          # VIF
+library(performance)  # check_model, R2 for mixed models
+library(MuMIn)        # R2 for lmer/clmm
+library(brant)        # Brant test for proportional odds
+library(caret)        # cross-validation
+library(effects)      # marginal effects
+library(ggeffects)    # marginal effect plots
+```
+
+
+## Mystery models
+
+Two complementary model families were estimated: 
+
+-sentiment score as the dependent variable, with OLS regressions: “for the same star rating, do reviewers use different language toward authors of different genders?” 
+
+-ordinal logistic models with the inverted question as a robustness check, to assess whether the mapping from sentiment to star probability differs by gender. 
+
+-mixed-effect regression models (1 | title) + (1 | author) to account for the fact that ultiple reviews in the datasets can be written about the same book, and many authors have several books included.
+
+All models use the same review text sentiment scores (added with sentimentr).
+
+
+```{r}
+
+set.seed(124)
+
+process_models_mystery <- function(data) {
+  
+  pipeline_start <- Sys.time()
+  message("🚀 Starting Mystery models pipeline at ", pipeline_start)
+  
+  # --- Step 1: Sentiment scores ---
+  step1_start <- Sys.time()
+  message("Step 1: Computing sentiment scores...")
+  
+  sample_sentiment <- sentiment_by(data$review_text, by = NULL)
+  
+  df <- data %>%
+    mutate(
+      sentiment_score = sample_sentiment$ave_sentiment,
+      gender = as.factor(gender),
+      review_rating = factor(review_rating, ordered = TRUE)
+    ) %>%
+    filter(!is.na(sentiment_score), !is.na(gender), !is.na(title), !is.na(author))
+  
+  df$gender <- droplevels(df$gender)
+  
+  step1_end <- Sys.time()
+  message("Step 1 complete. Duration: ", round(difftime(step1_end, step1_start, units = "secs"), 2), " secs")
+  
+  # --- Step 2: Linear models (sentiment outcome) ---
+  step2_start <- Sys.time()
+  message("Step 2: Running linear regression models (sentiment outcome)...")
+  
+  model_sent_base   <- lm(sentiment_score ~ review_rating, data = df)
+  model_sent_gender <- lm(sentiment_score ~ review_rating + gender, data = df)
+  model_sent_inter  <- lm(sentiment_score ~ review_rating * gender, data = df)
+  
+  step2_end <- Sys.time()
+  message("Step 2 complete. Duration: ", round(difftime(step2_end, step2_start, units = "secs"), 2), " secs")
+  
+  # --- Step 3: Ordinal logistic models (rating outcome) ---
+  step3_start <- Sys.time()
+  message("Step 3: Running ordinal logistic regression models (rating outcome)...")
+  
+  model_rating_base   <- polr(review_rating ~ sentiment_score, data = df, Hess = TRUE)
+  model_rating_gender <- polr(review_rating ~ sentiment_score + gender, data = df, Hess = TRUE)
+  model_rating_inter  <- polr(review_rating ~ sentiment_score * gender, data = df, Hess = TRUE)
+  
+  step3_end <- Sys.time()
+  message("Step 3 complete. Duration: ", round(difftime(step3_end, step3_start, units = "secs"), 2), " secs")
+  
+  # --- Step 4: Mixed-effects models ---
+  step4_start <- Sys.time()
+  message("Step 4: Running mixed-effects models (author + title random effects)...")
+  
+  model_sent_mixed <- lmer(sentiment_score ~ review_rating * gender + (1 | author) + (1 | title),
+                           data = df,
+                           control = lmerControl(optimizer = "bobyqa"))
+  
+  model_rating_mixed <- clmm(review_rating ~ sentiment_score * gender + (1 | author) + (1 | title),
+                             data = df)
+  
+  step4_end <- Sys.time()
+  message("Step 4 complete. Duration: ", round(difftime(step4_end, step4_start, units = "secs"), 2), " secs")
+  
+  pipeline_end <- Sys.time()
+  message("🎉 Mystery models pipeline completed at ", pipeline_end)
+  message("⏱️ Total runtime: ", round(difftime(pipeline_end, pipeline_start, units = "secs"), 2), " secs")
+  
+  return(list(
+    # OLS sentiment models
+    sent_base   = model_sent_base,
+    sent_gender = model_sent_gender,
+    sent_inter  = model_sent_inter,
+    
+    # Ordinal models
+    rating_base   = model_rating_base,
+    rating_gender = model_rating_gender,
+    rating_inter  = model_rating_inter,
+    
+    # Mixed-effects models
+    sent_mixed   = model_sent_mixed,
+    rating_mixed = model_rating_mixed
+  ))
+}
+
+# --- Run on Mystery dataset ---
+models_mystery <- process_models_mystery(mystery_author_mentions)
+
+```
+
+
+Visualize results:
+
+```{r}
+
+# --- Linear models (sentiment outcome) ---
+stargazer(
+  models_mystery$sent_base, models_mystery$sent_gender, models_mystery$sent_inter,
+  type = "html",
+  title = "Linear Models of Sentiment Score (Outcome) ~ Rating × Gender",
+  dep.var.labels = "Sentiment Score",
+  column.labels = c("Base", "Gender Added", "Interaction"),
+  covariate.labels = c("Review Rating", "Gender (Female)", "Gender (Unknown)", 
+                       "Review Rating × Gender (Female)", "Review Rating × Gender (Unknown)"),
+  omit.stat = c("f", "ser"),
+  no.space = TRUE,
+  out = "mystery_linear.html"
+)
+
+# Save as PNG
+webshot("mystery_linear.html", file = "mystery_linear.png", vwidth = 1200, vheight = 900)
+
+
+htmlreg(
+  list(models_mystery$rating_base, models_mystery$rating_gender, models_mystery$rating_inter),
+  file = "mystery_ordinal.html",
+  custom.model.names = c("Base", "Gender Added", "Interaction"),
+  caption = "Ordinal Logistic Models of Review Rating (Outcome) ~ Sentiment × Gender"
+)
+
+webshot("mystery_ordinal.html", "mystery_ordinal.png", vwidth = 1200, vheight = 900)
+
+```
+
+
+
+### Model validation and diagnostics
+
+For model validation and diagnostics, OLS models were checked with residual and QQ-plots, a Breusch–Pagan test for heteroskedasticity, VIFs for multicollinearity, and 10-fold cross-validation to assess predictive performance. 
+
+Ordinal logistic were evaluated with nominal and scale tests to test the proportional odds assumption, pseudo R², and classification accuracy. 
+
+Lastly, mixed-effects models were assessed via marginal and conditional R², intraclass correlation coefficients, and log-likelihood. 
+
+Marginal effects plots were additionally used to visualize predicted sentiment scores and rating probabilities across review rating and gender.
+
+```{r}
+# --- Validation & diagnostics pipeline for models_mystery ---
+
+# Extract models
+ols_model   <- models_mystery$sent_inter   # OLS interaction model
+polr_model  <- models_mystery$rating_inter # Ordinal logistic interaction
+lmer_model  <- models_mystery$sent_mixed   # Mixed linear
+clmm_model  <- models_mystery$rating_mixed # Mixed ordinal
+
+# --- 1. OLS diagnostics (sentiment outcome) ---
+message("OLS diagnostics...")
+
+# Residual vs Fitted
+plot(ols_model, which = 1)  # should look like random scatter
+# QQ-plot
+plot(ols_model, which = 2)
+
+# Breusch–Pagan test for heteroskedasticity
+print(bptest(ols_model))
+
+# VIF for multicollinearity
+print(vif(ols_model))
+
+# Cross-validation (10-fold CV, RMSE & R²)
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10)
+cv_model <- train(
+  sentiment_score ~ review_rating * gender,
+  data = ols_model$model,
+  method = "lm",
+  trControl = train_control
+)
+print(cv_model)
+
+# --- 2. Ordinal logistic diagnostics (rating outcome) ---
+message("Ordinal logistic regression diagnostics...")
+
+# Brant test (proportional odds assumption)
+print(brant(polr_model))
+
+# Pseudo R² measures
+print(pR2(polr_model))
+
+# Classification accuracy on observed vs predicted
+pred_class <- predict(polr_model, type = "class")
+acc <- mean(pred_class == polr_model$model$review_rating)
+message("Classification accuracy: ", round(acc, 3))
+
+# --- 3. Mixed-effects models (sample-based) ---
+message("Mixed-effects models diagnostics...")
+
+# lmer: R²
+print(r.squaredGLMM(lmer_model))
+
+# Check ICC to justify random effects
+icc_val <- performance::icc(lmer_model)
+print(icc_val)
+
+# clmm: no direct R², but logLik can be reported
+logLik(clmm_model)
+
+# --- 4. Marginal effects / predicted probabilities ---
+message("Computing marginal effects and plotting interactions...")
+
+# Marginal effects for OLS (sentiment outcome)
+eff_ols <- ggpredict(ols_model, terms = c("review_rating", "gender"))
+plot(eff_ols) + ggtitle("Predicted Sentiment by Rating × Gender")
+
+# Marginal effects for ordinal logistic (rating outcome)
+eff_polr <- ggpredict(polr_model, terms = c("sentiment_score", "gender"))
+plot(eff_polr) + ggtitle("Predicted Rating Probabilities by Sentiment × Gender")
+
+# --- 5. Save outputs (optional) ---
+ggsave("mystery_sentiment_interaction.png", plot = last_plot(), width = 8, height = 5, dpi = 300)
+
+```
+
+The OLS model for sentiment shows low multicollinearity (adjusted GVIFs < 2) but significant heteroskedasticity (BP = 228.84, p < 0.001). Predictive performance is modest, with R² ≈ 0.089, RMSE ≈ 0.171, and MAE ≈ 0.128. The model explains about 9% of the variance in sentiment scores. It detects patterns between sentiment, star rating, and gender, but effect sizes are small and heteroskedasticity should be considered.
+
+The mixed-effects models indicate that fixed effects explain ~9% of variance in sentiment (marginal R² = 0.094), while including random effects for book title increases explained variance to ~15% (conditional R² = 0.152). ICC = 0.065 shows that roughly 6–7% of the variance is attributable to clustering by title. 
+
+For the ordinal mixed model, log-likelihood confirms model fit. Overall, accounting for hierarchical structure improves explanatory power, though most variance remains at the individual review level.
+
+
+## Romance models
+
+Compute sentiment score, weigh the dataset in order to balance genders, and then compute linear, ordinal logistic and mixed-effects models:
+
+```{r}
+
+set.seed(124)
+
+process_models <- function(data) {
+  
+  # --- 1. Compute sentiment scores ---
+  sample_sentiment <- sentiment_by(data$review_text, by = NULL)
+  
+  df <- data %>%
+    mutate(
+      sentiment_score = sample_sentiment$ave_sentiment,
+      gender = as.factor(gender),
+      review_rating = factor(review_rating, ordered = TRUE)
+    ) %>%
+    filter(!is.na(sentiment_score), !is.na(gender), !is.na(title))
+  
+  df$gender <- droplevels(df$gender)
+  
+  # --- 2. Weighting scheme (to balance genders) ---
+  weights <- ifelse(df$gender == "male", 
+                    nrow(df) / (2 * sum(df$gender == "male")), 
+                    ifelse(df$gender == "female",
+                           nrow(df) / (2 * sum(df$gender == "female")), 1))
+  
+  # --- 3. Weighted models (MAIN analysis) ---
+  # Sentiment outcome
+  model_sent_base_w   <- lm(sentiment_score ~ review_rating, data = df, weights = weights)
+  model_sent_gender_w <- lm(sentiment_score ~ review_rating + gender, data = df, weights = weights)
+  model_sent_inter_w  <- lm(sentiment_score ~ review_rating * gender, data = df, weights = weights)
+  
+  # Ordinal logistic outcome
+  model_rating_base_w   <- polr(review_rating ~ sentiment_score, data = df, weights = weights, Hess = TRUE)
+  model_rating_gender_w <- polr(review_rating ~ sentiment_score + gender, data = df, weights = weights, Hess = TRUE)
+  model_rating_inter_w  <- polr(review_rating ~ sentiment_score * gender, data = df, weights = weights, Hess = TRUE)
+  
+  # --- 4. Downsampled dataset (ROBUSTNESS check) ---
+  male_df    <- df %>% filter(gender == "male")
+  female_df  <- df %>% filter(gender == "female")
+  unknown_df <- df %>% filter(gender == "unknown")
+  
+  set.seed(124)
+  female_down <- female_df %>% sample_n(min(nrow(male_df), nrow(female_df)))
+  
+  balanced_df <- bind_rows(male_df, female_down, unknown_df)
+  balanced_df$gender <- droplevels(balanced_df$gender)
+  
+  # Sentiment outcome
+  model_sent_base_bal   <- lm(sentiment_score ~ review_rating, data = balanced_df)
+  model_sent_gender_bal <- lm(sentiment_score ~ review_rating + gender, data = balanced_df)
+  model_sent_inter_bal  <- lm(sentiment_score ~ review_rating * gender, data = balanced_df)
+  
+  # Ordinal logistic outcome
+  model_rating_base_bal   <- polr(review_rating ~ sentiment_score, data = balanced_df, Hess = TRUE)
+  model_rating_gender_bal <- polr(review_rating ~ sentiment_score + gender, data = balanced_df, Hess = TRUE)
+  model_rating_inter_bal  <- polr(review_rating ~ sentiment_score * gender, data = balanced_df, Hess = TRUE)
+  
+  # --- 5. Mixed-effects models (account for clustering by title) ---
+  # Linear mixed model (sentiment outcome)
+  model_sent_mixed <- lmer(sentiment_score ~ review_rating * gender + (1 | title),
+                           data = df, weights = weights,
+                           control = lmerControl(optimizer = "bobyqa"))
+  
+  # Ordinal mixed model (rating outcome)
+  model_rating_mixed <- clmm(review_rating ~ sentiment_score * gender + (1 | title),
+                             data = df, weights = weights)
+  
+  return(list(
+    # Weighted models
+    sent_base_w   = model_sent_base_w,
+    sent_gender_w = model_sent_gender_w,
+    sent_inter_w  = model_sent_inter_w,
+    rating_base_w   = model_rating_base_w,
+    rating_gender_w = model_rating_gender_w,
+    rating_inter_w  = model_rating_inter_w,
+    
+    # Downsampled models
+    sent_base_bal   = model_sent_base_bal,
+    sent_gender_bal = model_sent_gender_bal,
+    sent_inter_bal  = model_sent_inter_bal,
+    rating_base_bal   = model_rating_base_bal,
+    rating_gender_bal = model_rating_gender_bal,
+    rating_inter_bal  = model_rating_inter_bal,
+    
+    # Mixed-effects models
+    sent_mixed   = model_sent_mixed,
+    rating_mixed = model_rating_mixed
+  ))
+}
+
+# --- Run on Romance dataset (replace with Mystery dataset as needed) ---
+models_romance <- process_models(romance_author_mentions)
+
+# --- Example Stargazer output: Linear models (sentiment outcome) ---
+stargazer(
+  models_romance$sent_base_w, models_romance$sent_gender_w, models_romance$sent_inter_w,
+  models_romance$sent_base_bal, models_romance$sent_gender_bal, models_romance$sent_inter_bal,
+  type = "text",
+  title = "Linear Models of Sentiment Score (Outcome) ~ Rating × Gender"
+)
+
+# Mixed models need to be summarized separately
+summary(models_romance$sent_mixed)
+summary(models_romance$rating_mixed)
+
+```
+
+Now we visualize them with Stargazer and htmlreg:
+
+```{r}
+
+# --- Linear models (sentiment outcome) ---
+linear_models <- list(
+  models_romance$sent_base_w,
+  models_romance$sent_gender_w,
+  models_romance$sent_inter_w,
+  models_romance$sent_base_bal,
+  models_romance$sent_gender_bal,
+  models_romance$sent_inter_bal
+)
+
+# Drop NULLs or bad models just in case
+linear_models <- Filter(Negate(is.null), linear_models)
+
+stargazer(
+  linear_models,
+  type = "html",
+  title = "Linear Models of Sentiment Score (Outcome) ~ Rating × Gender",
+  dep.var.labels = "Sentiment Score",
+  column.labels = c("Base (W)", "Gender Added (W)", "Interaction (W)",
+                    "Base (Balanced)", "Gender Added (Balanced)", "Interaction (Balanced)"),
+  covariate.labels = c("Review Rating", "Gender (Female)", "Gender (Unknown)", 
+                       "Review Rating × Gender (Female)", "Review Rating × Gender (Unknown)"),
+  omit.stat = c("f", "ser"),
+  no.space = TRUE,
+  out = "romance_linear.html"
+)
+
+# Save as PNG
+webshot("romance_linear.html", file = "romance_linear.png", vwidth = 1200, vheight = 900)
+
+
+# --- Ordinal logistic models (review rating outcome) ---
+rating_models <- list(
+  extract(models_romance$rating_base_w),
+  extract(models_romance$rating_gender_w),
+  extract(models_romance$rating_inter_w),
+  extract(models_romance$rating_base_bal),
+  extract(models_romance$rating_gender_bal),
+  extract(models_romance$rating_inter_bal)
+)
+
+htmlreg(
+  rating_models,
+  file = "romance_ordinal.html",
+  custom.model.names = c("Base (W)", "Gender Added (W)", "Interaction (W)",
+                         "Base (Balanced)", "Gender Added (Balanced)", "Interaction (Balanced)"),
+  caption = "Ordinal Logistic Models of Review Rating (Outcome) ~ Sentiment × Gender"
+)
+
+webshot("romance_ordinal.html", "romance_ordinal.png", vwidth = 1200, vheight = 900)
+
+
+# --- Mixed models (summarize separately) ---
+summary(models_romance$sent_mixed)
+summary(models_romance$rating_mixed)
+
+
+```
+
+Code for mixed effects:
+
+```{r}
+
+# Extract tidy summaries
+sent_mixed_tbl <- tidy(models_romance$sent_mixed, effects = "fixed") %>%
+  mutate(model = "Sentiment Mixed")
+
+rating_mixed_tbl <- tidy(models_romance$rating_mixed, effects = "fixed") %>%
+  mutate(model = "Rating Mixed")
+
+# Combine into one dataframe
+mixed_tbl <- bind_rows(sent_mixed_tbl, rating_mixed_tbl)
+
+# Show as table in console
+print(mixed_tbl)
+
+# Export to HTML
+kable(mixed_tbl, format = "html", caption = "Fixed Effects from Mixed Models") %>%
+  cat(file = "romance_mixed.html")
+
+webshot("romance_mixed.html", "romance_mixed.png", vwidth = 1200, vheight = 900)
+
+```
+
+
+### Model validation and diagnostics
+
+For model validation and diagnostics, OLS models were checked with residual and QQ-plots, a Breusch–Pagan test for heteroskedasticity, VIFs for multicollinearity, and 10-fold cross-validation to assess predictive performance. 
+
+Ordinal logistic were evaluated with nominal and scale tests to test the proportional odds assumption, pseudo R², and classification accuracy. 
+
+Lastly, mixed-effects models were assessed via marginal and conditional R², intraclass correlation coefficients, and log-likelihood. 
+
+Marginal effects plots were additionally used to visualize predicted sentiment scores and rating probabilities across review rating and gender.
+
+```{r}
+
+# --- Validation & diagnostics pipeline for models_romance ---
+
+# Extract models
+ols_model   <- models_romance$sent_inter_w   # Weighted OLS interaction model
+polr_model  <- models_romance$rating_inter_w # Weighted ordinal logistic interaction
+lmer_model  <- models_romance$sent_mixed     # Mixed linear
+clmm_model  <- models_romance$rating_mixed   # Mixed ordinal
+
+# --- 1. OLS diagnostics (sentiment outcome) ---
+message("OLS diagnostics...")
+
+# Residual vs Fitted
+plot(ols_model, which = 1)  # should look like random scatter
+# QQ-plot
+plot(ols_model, which = 2)
+
+# Breusch–Pagan test for heteroskedasticity
+print(bptest(ols_model))
+
+# VIF for multicollinearity
+print(vif(ols_model))
+
+# Cross-validation (10-fold CV, RMSE & R²)
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10)
+cv_model <- train(
+  sentiment_score ~ review_rating * gender,
+  data = ols_model$model,
+  method = "lm",
+  trControl = train_control
+)
+print(cv_model)
+
+# --- 2. Ordinal logistic diagnostics (rating outcome) ---
+message("Ordinal logistic regression diagnostics...")
+
+
+# Use clm from 'ordinal' instead of polr
+clm_model <- ordinal::clm(
+  review_rating ~ sentiment_score * gender,
+  data = models_romance$rating_inter_w$model,
+  weights = models_romance$rating_inter_w$weights,
+  link = "logit"
+)
+
+# Nominal test (like Brant test)
+nominal_test(clm_model)
+
+# Scale test (detects non-proportionality)
+scale_test(clm_model)
+# Pseudo R² measures
+print(pR2(polr_model))
+
+# Classification accuracy on observed vs predicted
+# Get predicted classes
+pred_class <- predict(polr_model, type = "class")
+
+# Convert both predicted and true to character
+true_class <- as.character(polr_model$model$review_rating)
+pred_class <- as.character(pred_class)
+
+# Compute accuracy
+acc <- mean(pred_class == true_class)
+message("Classification accuracy: ", round(acc, 3))
+
+
+# --- 3. Mixed-effects models (sample-based) ---
+message("Mixed-effects models diagnostics...")
+
+# lmer: R²
+print(r.squaredGLMM(lmer_model))
+
+# Check ICC to justify random effects
+icc_val <- performance::icc(lmer_model)
+print(icc_val)
+
+# clmm: no direct R², but logLik can be reported
+print(logLik(clmm_model))
+
+# --- 4. Marginal effects / predicted probabilities ---
+message("Computing marginal effects and plotting interactions...")
+
+
+# Marginal effects for OLS (sentiment outcome)
+eff_ols <- ggpredict(ols_model, terms = c("review_rating", "gender"))
+plot(eff_ols) + ggtitle("Predicted Sentiment by Rating × Gender")
+
+# Marginal effects for ordinal logistic (rating outcome)
+eff_polr <- ggpredict(polr_model, terms = c("sentiment_score", "gender"))
+plot(eff_polr) + ggtitle("Predicted Rating Probabilities by Sentiment × Gender")
+
+# --- 5. Save outputs (optional) ---
+ggsave("romance_sentiment_interaction.png", plot = last_plot(), width = 8, height = 5, dpi = 300)
+
+```
+
+Results indicate that sentiment scores and review ratings are influenced by both sentiment, gender, and their interaction, but with varying degrees of explanatory power across model types. 
+
+The OLS interaction model shows that predictors are not highly correlated (VIFs < 2), but the Breusch–Pagan test detects heteroskedasticity, and cross-validated performance is modest (R² ≈ 0.11, RMSE ≈ 0.15), meaning limited predictive power. 
+
+Ordinal logistic model reveals significant effects of sentiment, gender, and their interaction, but nominal and scale tests indicate that the proportional odds assumption is violated.
+
+Mixed-effects models show that accounting for title-level clustering improves fit. 
+
+Overall, while all predictors have significant relationships with outcomes, effect sizes and predictive performance are modest. Results should be interpreted with caution  due to heteroskedasticity, non-proportional odds, and residual variance.

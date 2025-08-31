@@ -1,0 +1,1277 @@
+---
+title: "Not-So-Great-Expectations. Code for data curation"
+author: "Rocío Galeote"
+date: "2025-08-30"
+output: html_document
+---
+
+# Data curation process
+
+NOTE: This rmd serves as Part 2 of the accompanying code for the thesis "Not-so-Great Expectations: Analyzing Gender, Genre and Reader Bias in Commercial Fiction Using Natural Language Processing".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+```{r libraries, warning= FALSE}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(cld3)
+library(stringr)
+library(wordcloud)
+library(reshape2)
+library(tidytext)
+library(patchwork)
+```
+
+
+## Read the files
+
+```{r}
+
+load("mystery_clean.RData")
+load("romance_clean.RData")
+
+```
+
+
+
+### PART 1. Data removal
+
+First, delete rows with author "NA", I need only those whose author I can analyze:
+
+```{r}
+# Remove rows where 'author' is NA in both datasets
+mystery_clean <- mystery_clean %>%
+  filter(!is.na(author))
+
+romance_clean <- romance_clean %>%
+  filter(!is.na(author))
+
+```
+
+
+Then, count duplicate reviews, to see if I can delete useless texts:
+
+```{r}
+
+# Function to find and list all unique duplicated review texts
+find_unique_duplicated_reviews <- function(data) {
+  data %>%
+    group_by(review_text) %>%
+    summarise(duplicate_count = n(), .groups = "drop") %>%
+    filter(duplicate_count > 1) %>%
+    arrange(desc(duplicate_count))
+}
+
+# Apply to both datasets
+duplicated_reviews_mystery <- find_unique_duplicated_reviews(mystery_clean)
+duplicated_reviews_romance <- find_unique_duplicated_reviews(romance_clean)
+
+# View all unique duplicated texts (with counts)
+print(duplicated_reviews_mystery)
+print(duplicated_reviews_romance)
+
+
+```
+
+Here, I can see that there are many reviews that only contain the numeric rating with decimals (because Goodreads does not allow them) and reviews that only consist of text like
+
+- "Review to come in this website": they are just links to the review, so I delete them
+
+- "ARC": the reviews containing the word ARC (Advanced Reader Copy) may not be truly honest, as they are mostly sent by the publisher or authors, so reviewers may tend to inflate their rating. For this reason, I delete these too.
+
+```{r}
+#Ratings with decimals
+
+# Create a flexible pattern that handles dots, commas, slashes, stars, and punctuation like ! or ?
+star_pattern <- regex(
+  "^\\**\\s*(2[\\.,]?5|3[\\.,]?5|4[\\.,]?5|2\\s*1/2|3\\s*1/2|4\\s*1/2)\\s*(\\*|/5|stars?)?[\\s\\*]*[.!?]*\\s*$",
+  ignore_case = TRUE
+)
+
+# Count how many are being removed
+mystery_star_reviews_count <- mystery_clean %>%
+  filter(str_detect(review_text, star_pattern)) %>%
+  nrow()
+
+romance_star_reviews_count <- romance_clean %>%
+  filter(str_detect(review_text, star_pattern)) %>%
+  nrow()
+
+cat("🔍 Mystery reviews to remove (2.5/3.5/4.5 stars):", mystery_star_reviews_count, "\n")
+cat("🔍 Romance reviews to remove (2.5/3.5/4.5 stars):", romance_star_reviews_count, "\n")
+
+# Remove them from the datasets
+mystery_clean <- mystery_clean %>%
+  filter(!str_detect(review_text, star_pattern))
+
+romance_clean <- romance_clean %>%
+  filter(!str_detect(review_text, star_pattern))
+
+
+
+#Review to come and etc
+
+library(stringr)
+
+# Define a pattern that matches different variations, case-insensitive
+placeholder_pattern <- regex("review (to come|to follow|coming soon)[[:punct:]\\s]*$", ignore_case = TRUE)
+
+# Count how many placeholders there are in each dataset
+num_placeholders_mystery <- sum(str_detect(mystery_clean$review_text, placeholder_pattern), na.rm = TRUE)
+num_placeholders_romance <- sum(str_detect(romance_clean$review_text, placeholder_pattern), na.rm = TRUE)
+
+cat("📚 Mystery: Found", num_placeholders_mystery, "placeholder reviews\n")
+cat("💖 Romance: Found", num_placeholders_romance, "placeholder reviews\n")
+
+# Remove those rows
+mystery_clean <- mystery_clean %>%
+  filter(!str_detect(review_text, placeholder_pattern))
+
+romance_clean <- romance_clean %>%
+  filter(!str_detect(review_text, placeholder_pattern))
+
+
+```
+
+I have seen that there are many reviews that are just one random character, i want to see what their numeric ratings are to see if this is review bombing
+
+```{r}
+
+# Pattern to detect single non-digit character reviews (excluding whitespace)
+single_char_pattern <- regex("^\\s*[^\\d\\s]{1}\\s*$")
+
+# Filter mystery dataset
+mystery_single_char_reviews <- mystery_clean %>%
+  filter(str_detect(review_text, single_char_pattern)) %>%
+  select(review_text, review_rating)
+
+# Filter romance dataset
+romance_single_char_reviews <- romance_clean %>%
+  filter(str_detect(review_text, single_char_pattern)) %>%
+  select(review_text, review_rating)
+
+# View results
+cat("🕵️‍♀️ Mystery: One-character reviews found:", nrow(mystery_single_char_reviews), "\n")
+print(mystery_single_char_reviews)
+
+cat("\n💘 Romance: One-character reviews found:", nrow(romance_single_char_reviews), "\n")
+print(romance_single_char_reviews)
+
+
+```
+
+
+Checking which are the titles with the most single-character reviews
+
+```{r}
+# Check for single character reviews in both datasets
+mystery_single_char_reviews <- mystery_clean %>%
+  filter(nchar(review_text) == 1) %>%
+  count(title, sort = TRUE)
+
+romance_single_char_reviews <- romance_clean %>%
+  filter(nchar(review_text) == 1) %>%
+  count(title, sort = TRUE)
+
+# View top titles with the most single character reviews
+head(mystery_single_char_reviews, 10)
+head(romance_single_char_reviews, 10)
+
+```
+
+At first glance, I don't see any evidence of review bombing (lowering an author's rating out of hate by rating their books 0 stars). Also, some 0s could be induced missing data due to an error in the scraping process of the original dataset. Thus, I don't focus my study in this particular effect.
+
+
+Then, I keep cleaning and optimizing title names so that there is a column with the actual title and after it the series to which it belongs to:
+
+```{r}
+
+# Optimized cleaning function
+clean_and_update_titles <- function(data) {
+  data %>%
+    mutate(
+      title_series = str_extract(title, "\\(.*\\)") %>%
+                     str_remove_all("^\\(|\\)$") %>%
+                     str_trim(),
+      title = str_trim(str_remove(title, "\\(.*\\)"))
+    ) %>%
+    select(-title_without_series) %>%
+    relocate(title_series, .after = title)
+}
+
+# Apply to both datasets
+mystery_clean <- clean_and_update_titles(mystery_clean)
+romance_clean <- clean_and_update_titles(romance_clean)
+
+
+```
+
+
+
+#### Preliminary dataset statistics
+
+After deletion, we check what the dataset looks like:
+
+```{r}
+
+library(dplyr)
+
+analyze_dataset <- function(data, name) {
+  n_unique_titles <- data %>% pull(title) %>% unique() %>% length()
+  n_unique_authors <- data %>% pull(author) %>% unique() %>% length()
+  na_per_column <- sapply(data, function(x) sum(is.na(x)))
+  total_na <- sum(is.na(data))
+  
+  cat("📚 Dataset:", name, "\n")
+  cat("• Unique titles:", n_unique_titles, "\n")
+  cat("• Unique authors:", n_unique_authors, "\n")
+  cat("• Total NAs in dataset:", total_na, "\n")
+  cat("• NAs per column:\n")
+  print(na_per_column)
+  cat("\n--------------------------------------\n\n")
+}
+
+# Run the function on both datasets
+analyze_dataset(mystery_final, "Mystery")
+analyze_dataset(romance_final, "Romance")
+
+```
+
+Dataset: Mystery 
+• Unique titles: 14575 
+• Unique authors: 6830 
+• Total NAs in dataset: 153861 
+
+Dataset: Romance 
+• Unique titles: 29088 
+• Unique authors: 12183 
+• Total NAs in dataset: 249075
+
+NAs are only in title_series, description and pages, which are variables we will not need in principle
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Function to summarize and plot top authors with counts shown
+author_summary_plot <- function(data, dataset_name, bar_color) {
+  author_counts <- data %>%
+    count(author, sort = TRUE)
+
+  unique_titles <- data %>%
+    distinct(title) %>%
+    nrow()
+
+  cat("📚 Dataset:", dataset_name, "\n")
+  cat("🔢 Unique authors:", nrow(author_counts), "\n")
+  cat("📖 Unique titles:", unique_titles, "\n")
+  cat("👥 Top authors:\n")
+  print(head(author_counts, 10))
+
+  top_authors <- head(author_counts, 15)
+
+  ggplot(top_authors, aes(x = reorder(author, n), y = n)) +
+    geom_col(fill = bar_color) +
+    geom_text(aes(label = n), hjust = -0.1, size = 4) +
+    coord_flip() +
+    labs(
+      title = paste("Top 15 Authors in", dataset_name),
+      x = "Author",
+      y = "Number of Books/Reviews"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(plot.title = element_text(face = "bold")) +
+    expand_limits(y = max(top_authors$n) * 1.1)
+}
+
+# Plot separately
+plot_mystery <- author_summary_plot(mystery_clean, "Mystery", "black")
+plot_romance <- author_summary_plot(romance_clean, "Romance", "pink")
+
+# Display plots
+print(plot_mystery)
+print(plot_romance)
+
+ggsave(filename= "mysteryauthors.png", plot= plot_mystery)
+ggsave(filename= "romanceauthors.png", plot= plot_romance)
+
+# Function to summarize and plot top titles with counts shown
+title_summary_plot <- function(data, dataset_name, bar_color) {
+  title_counts <- data %>%
+    count(title, sort = TRUE)
+
+  cat("📚 Dataset:", dataset_name, "\n")
+  cat("📖 Unique titles:", nrow(title_counts), "\n")
+  cat("🏆 Top titles:\n")
+  print(head(title_counts, 10))
+
+  top_titles <- head(title_counts, 15)
+
+  ggplot(top_titles, aes(x = reorder(title, n), y = n)) +
+    geom_col(fill = bar_color) +
+    geom_text(aes(label = n), hjust = -0.1, size = 4) +
+    coord_flip() +
+    labs(
+      title = paste("Top 15 Titles in", dataset_name),
+      x = "Title",
+      y = "Number of Reviews"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(plot.title = element_text(face = "bold")) +
+    expand_limits(y = max(top_titles$n) * 1.1)
+}
+
+# Plot separately for mystery and romance
+plot_mystery_titles <- title_summary_plot(mystery_clean, "Mystery", "black")
+plot_romance_titles <- title_summary_plot(romance_clean, "Romance", "pink")
+
+# Display plots
+print(plot_mystery_titles)
+print(plot_romance_titles)
+
+
+
+```
+
+
+Counting the ratings:
+
+```{r}
+
+# Count review ratings in Mystery
+mystery_ratings <- mystery_clean %>%
+  count(review_rating, sort = TRUE)
+
+cat("🔍 Mystery Ratings:\n")
+print(mystery_ratings)
+
+# Count review ratings in Romance
+romance_ratings <- romance_clean %>%
+  count(review_rating, sort = TRUE)
+
+cat("\n💘 Romance Ratings:\n")
+print(romance_ratings)
+
+
+
+# Add dataset name for combining
+mystery_ratings$genre <- "Mystery"
+romance_ratings$genre <- "Romance"
+
+# Combine
+ratings_combined <- bind_rows(mystery_ratings, romance_ratings)
+
+# Plot
+ratingsboth <- ggplot(ratings_combined, aes(x = as.factor(review_rating), y = n, fill = genre)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Review Ratings Distribution",
+    x = "Review Rating",
+    y = "Count"
+  ) +
+  scale_fill_manual(values = c("Mystery" = "black", "Romance" = "pink")) +
+  theme_minimal(base_size = 13)
+
+ggsave(filename= "ratingsboth.png", plot= ratingsboth)
+
+```
+
+
+Check if there are repeated titles in both datasets:
+
+```{r}
+
+# Get the intersecting titles
+common_titles <- intersect(mystery_clean$title, romance_clean$title)
+
+# See how many there are
+length(common_titles)
+
+# View the first few titles
+head(common_titles, 10)
+
+# Get authors from mystery
+mystery_common_authors <- mystery_clean %>%
+  filter(title %in% common_titles) %>%
+  select(title, author) %>%
+  distinct() %>%
+  arrange(title)
+
+# Get authors from romance
+romance_common_authors <- romance_clean %>%
+  filter(title %in% common_titles) %>%
+  select(title, author) %>%
+  distinct() %>%
+  arrange(title)
+
+# View the results separately
+head(mystery_common_authors, 10)
+head(romance_common_authors, 10)
+
+
+
+# Count number of reviews for common titles in mystery
+mystery_common_review_counts <- mystery_clean %>%
+  filter(title %in% common_titles) %>%
+  group_by(title) %>%
+  summarise(n_reviews = n_distinct(review_id)) %>%
+  arrange(desc(n_reviews))
+
+# Count number of reviews for common titles in romance
+romance_common_review_counts <- romance_clean %>%
+  filter(title %in% common_titles) %>%
+  group_by(title) %>%
+  summarise(n_reviews = n_distinct(review_id)) %>%
+  arrange(desc(n_reviews))
+
+# Optionally: Combine both to compare side-by-side
+review_comparison <- full_join(mystery_common_review_counts, romance_common_review_counts, by = "title", suffix = c("_mystery", "_romance"))
+
+# View the results
+head(review_comparison, 10)  # Or use View(review_comparison) if in RStudio
+
+```
+
+The original dataset included reviews in many languages, and I filtered them to use only the ones that were in English. 
+
+However, I have seen that some of the reviews are classified as English in the original dataset but the language is incorrect. Thus, I perform a preliminar analysis to detect reviews that are not in English:
+
+```{r}
+
+# Detect language
+mystery_clean <- mystery_clean |> 
+  mutate(
+    detected_language = detect_language(review_text))
+
+mystery_clean |> 
+  count(detected_language, sort = TRUE)
+
+# Filter rows where review_text contains "registered a book"
+registered_reviews <- mystery_clean |> 
+  filter(str_detect(review_text, "registered a book"))
+
+#Remove those rows
+mystery_clean <- mystery_clean |> 
+  filter(!str_detect(str_to_lower(review_text), "registered a book"))
+
+
+mystery_clean |> 
+  count(detected_language, sort = TRUE)
+
+#ROMANCE
+
+# Detect language
+romance_clean <- romance_clean |> 
+  mutate(
+    detected_language = detect_language(review_text))
+
+
+# Filter rows where review_text contains "registered a book"
+registered_reviews <- romance_clean |> 
+  filter(str_detect(review_text, "registered a book"))
+
+# Remove those rows
+romance_clean <- romance_clean |> 
+  filter(!str_detect(str_to_lower(review_text), "registered a book"))
+
+romance_clean |> 
+  count(detected_language, sort = TRUE)
+
+```
+
+Here I could see that in future steps I will have to look at language detection.
+
+
+### PART 2. Genderization
+
+The second step of the data cleaning process is to find out the gender of the authors in each dataset, through the OpenAI API.
+
+We extract the first names of the authors from the datasets:
+
+```{r}
+
+# Step 1: Extract first name from author column
+extract_first_name <- function(name) {
+  if (is.na(name) || name == "") return(NA)
+
+  # Split by space, take the first chunk
+  first_part <- str_split(name, " ", simplify = TRUE)[,1]
+
+  # Remove trailing punctuation
+  first_part <- str_remove(first_part, "[,\\.]+$")
+
+  return(first_part)
+}
+
+# Step 2: Apply to dataset
+get_first_name <- function(data) {
+  data <- data %>%
+    mutate(
+      first_name = sapply(author, extract_first_name)
+    )
+}
+
+# Apply to both datasets
+mystery_clean <- get_first_name(mystery_clean)
+romance_clean <- get_first_name(romance_clean)
+
+```
+
+
+```{r}
+# Extract the first_name column from both datasets
+first_names_mystery <- mystery_clean$first_name
+first_names_romance <- romance_clean$first_name
+
+# Save the first_name columns as CSV files
+write.csv(first_names_mystery, file = "first_names_mystery.csv", row.names = FALSE)
+write.csv(first_names_romance, file = "first_names_romance.csv", row.names = FALSE)
+```
+
+API procedure:
+
+```{r, eval= FALSE}
+
+mi_api_key <- Sys.getenv("OPENAI_API_KEY")
+
+
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(stringr)
+library(readr)
+
+# STEP 1: Load the name files
+mystery_names <- read_csv("first_names_mystery.csv")
+romance_names <- read_csv("first_names_romance.csv")
+
+# STEP 2: Combine and clean names
+all_names <- bind_rows(mystery_names, romance_names) %>%
+  filter(!is.na(first_name), first_name != "") %>%
+  distinct(first_name) %>%
+  mutate(first_name = str_trim(first_name),
+         gender = NA_character_)  # Add gender column
+
+# STEP 3: Define gender classification function with error logging only
+clasificar_genero_por_lote <- function(df, start_idx, end_idx, openai_api_key, model = "gpt-4o-mini") {
+  for (i in start_idx:end_idx) {
+    nombre <- df$first_name[i]
+
+    prompt <- paste0(
+      "Classify the following first name as 'male', 'female', or 'unknown'. Respond with only one word.\n\nName: ", nombre
+    )
+
+    intentos <- 0
+    max_intentos <- 5
+    respuesta <- NULL
+
+    while (intentos < max_intentos && is.null(respuesta)) {
+      intentos <- intentos + 1
+      Sys.sleep(1.5)
+
+      res <- tryCatch({
+        POST(
+          url = "https://api.openai.com/v1/chat/completions",
+          add_headers(
+            Authorization = paste("Bearer", openai_api_key),
+            `Content-Type` = "application/json"
+          ),
+          body = toJSON(list(
+            model = model,
+            messages = list(
+              list(role = "system", content = "You are a helpful assistant with an occidentalist view that classifies gender based on first names."),
+              list(role = "user", content = prompt)
+            ),
+            temperature = 0
+          ), auto_unbox = TRUE)
+        )
+      }, error = function(e) {
+        message(paste("❌ Error en intento", intentos, "fila", i, "-", nombre, ":", e$message))
+        return(NULL)
+      })
+
+      if (!is.null(res) && status_code(res) == 200) {
+        json_respuesta <- content(res, as = "parsed", encoding = "UTF-8")
+        respuesta <- json_respuesta$choices[[1]]$message$content
+      } else if (!is.null(res)) {
+        message(paste("⚠️ Fallo de API en fila", i, "-", nombre, "→ Código:", status_code(res)))
+        print(content(res, as = "text"))
+      }
+    }
+
+    if (is.null(respuesta)) {
+      df$gender[i] <- "error"
+      message(paste("❌ Sin respuesta válida en fila", i, "-", nombre))
+    } else {
+      gender_clean <- tolower(str_trim(respuesta))
+      df$gender[i] <- ifelse(gender_clean %in% c("male", "female", "unknown"), gender_clean, "unclear")
+    }
+  }
+
+  return(df)
+}
+
+# STEP 4: Set batch range
+start_idx <- 1
+end_idx <- nrow(all_names)
+
+# STEP 5: Run the classification
+classified_names <- clasificar_genero_por_lote(
+  df = all_names,
+  start_idx = start_idx,
+  end_idx = end_idx,
+  openai_api_key = mi_api_key
+)
+
+# STEP 6: Save results
+write_csv(classified_names, "classified_names_all.csv")
+
+```
+
+Now we insert the results into the datasets:
+
+```{r}
+
+# STEP 1: Load classified genders
+classified_names <- read_csv("classified_names_all.csv")
+
+
+# STEP 3: Make sure 'first_name' column is clean and matching
+classified_names <- classified_names %>%
+  mutate(first_name = str_trim(first_name))
+
+mystery_clean <- mystery_clean %>%
+  mutate(first_name = str_trim(first_name))
+
+romance_clean <- romance_clean %>%
+  mutate(first_name = str_trim(first_name))
+
+# STEP 4: Left join to add the gender column
+mystery_with_gender <- mystery_clean %>%
+  left_join(classified_names, by = "first_name")
+
+romance_with_gender <- romance_clean %>%
+  left_join(classified_names, by = "first_name")
+
+# STEP 5: Save
+#write_csv(mystery_with_gender, "mystery_with_gender.csv")
+#write_csv(romance_with_gender, "romance_with_gender.csv")
+
+```
+
+Intermediate datasets are here created after Part 2: *mystery_with_gender and romance_with_gender*, which will be further used in Part 3.
+
+Basic statistics atfer genderization:
+
+```{r}
+
+# Gender distribution in mystery dataset
+
+mystery_with_gender %>%
+  count(gender, sort = TRUE) %>%
+  print()
+
+# Gender distribution in romance dataset
+
+romance_with_gender %>%
+  count(gender, sort = TRUE) %>%
+  print()
+
+```
+
+
+```{r}
+# For Mystery dataset
+na_gender_mystery <- mystery_with_gender %>%
+  filter(is.na(gender)) %>%
+  pull(first_name) %>%
+  unique()
+
+# For Romance dataset
+na_gender_romance <- romance_with_gender %>%
+  filter(is.na(gender)) %>%
+  pull(first_name) %>%
+  unique()
+
+# Print results
+cat("🕵️‍♂️ Mystery - Unique First Names with NA Gender:\n")
+print(na_gender_mystery)
+
+cat("\n💘 Romance - Unique First Names with NA Gender:\n")
+print(na_gender_romance)
+
+
+#Correct the ones that are wrong
+
+
+# Define  manual gender assignments
+female_names <- c("JoAnna", "Maryann", "Carolina", "Sabel", "DeAnna", "Annalisa",
+                  "MacKenzie", "LeAnne", "Hyouta", "ReGina", "JoAnne", "Joann",
+                  "eden", "Keli", "Katey", "LorI")
+
+male_names <- c("Mr.")
+
+# Normalize helper function
+normalize_name <- function(name) {
+  str_to_lower(str_trim(name))
+}
+
+# Function to apply manual corrections
+apply_manual_gender_corrections <- function(df) {
+  df %>%
+    mutate(
+      first_name_lower = normalize_name(first_name),
+      gender = case_when(
+        is.na(gender) & first_name %in% female_names ~ "female",
+        is.na(gender) & first_name %in% male_names ~ "male",
+        is.na(gender) ~ "unknown",
+        TRUE ~ gender
+      )
+    ) %>%
+    select(-first_name_lower)
+}
+
+# Apply to both datasets
+mystery_with_gender <- apply_manual_gender_corrections(mystery_with_gender)
+romance_with_gender <- apply_manual_gender_corrections(romance_with_gender)
+
+
+```
+
+
+### PART 3. Language detection
+
+
+There are still reviews I don't need and I missed in the first go, so I keep cleaning.
+
+```{r}
+#Ratings with decimals
+
+# Create a flexible pattern that handles dots, commas, slashes, stars, and punctuation like ! or ?
+star_pattern <- regex(
+  "^\\**\\s*(?:[0-5](?:[\\.,']\\d{1,2})?|[0-5]\\[\\?\\]|[0-5]\\s*1/2|1/2)\\s*(/5)?\\s*(stars?|\\*)?[.!?]*\\s*$",
+  ignore_case = TRUE
+)
+
+# Count how many are being removed
+mystery_star_reviews_count <- mystery_with_gender %>%
+  filter(str_detect(review_text, star_pattern)) %>%
+  nrow()
+
+romance_star_reviews_count <- romance_with_gender %>%
+  filter(str_detect(review_text, star_pattern)) %>%
+  nrow()
+
+cat("🔍 Mystery reviews to remove (2.5/3.5/4.5 stars):", mystery_star_reviews_count, "\n")
+cat("🔍 Romance reviews to remove (2.5/3.5/4.5 stars):", romance_star_reviews_count, "\n")
+
+# Remove them from the datasets
+mystery_with_gender <- mystery_with_gender %>%
+  filter(!str_detect(review_text, star_pattern))
+
+romance_with_gender <- romance_with_gender %>%
+  filter(!str_detect(review_text, star_pattern))
+
+#If review text and review rating are the same, delete the instances:
+
+
+mystery_with_gender <- mystery_with_gender %>%
+  filter(as.character(review_rating) != str_trim(review_text))
+
+romance_with_gender <- romance_with_gender %>%
+  filter(as.character(review_rating) != str_trim(review_text))
+
+
+#More thorough cleaning for romance dataset
+
+# Extract reviews containing 'http:'
+romance_with_links <- romance_with_gender %>%
+  filter(str_detect(review_text, "http:"))
+
+# View the first few rows
+print(head(romance_with_links, 10))
+
+# Optional: see how many there are
+cat("🔗 Total reviews with 'http:':", nrow(romance_with_links), "\n")
+
+
+# Count how many reviews with 'http:' have NA in detected_language
+num_na_language <- romance_with_links %>%
+  filter(is.na(detected_language)) %>%
+  nrow()
+
+cat("🕵️ Reviews with 'http:' and NA in detected_language:", num_na_language, "\n")
+
+# Remove reviews that contain 'http:' and have NA in detected_language
+romance_with_gender <- romance_with_gender %>%
+  filter(!(str_detect(review_text, "http:") & is.na(detected_language)))
+
+
+```
+
+Now let's add a column with the number of characters in the column review_text so that i can make decisions regarding the language detected:
+
+```{r}
+# Add characters column to mystery dataset
+mystery_with_gender <- mystery_with_gender %>%
+  mutate(characters = nchar(review_text))
+
+# Add characters column to romance dataset
+romance_with_gender <- romance_with_gender %>%
+  mutate(characters = nchar(review_text))
+```
+
+
+I want to see if reviews with few characters are wrongly classified as not English:
+
+```{r}
+# Mystery summary
+mystery_with_gender %>%
+  group_by(detected_language) %>%
+  summarise(
+    count = n(),
+    avg_characters = mean(characters, na.rm = TRUE),
+    median_characters = median(characters, na.rm = TRUE)
+  )
+
+# Romance summary
+romance_with_gender %>%
+  group_by(detected_language) %>%
+  summarise(
+    count = n(),
+    avg_characters = mean(characters, na.rm = TRUE),
+    median_characters = median(characters, na.rm = TRUE)
+  )
+
+```
+
+
+We start double-checking language detection:
+
+```{r}
+# Count non-English reviews in each dataset
+non_english_mystery <- mystery_with_gender %>%
+  filter(detected_language != "en")
+
+non_english_romance <- romance_with_gender %>%
+  filter(detected_language != "en")
+
+cat("Mystery - Non-English reviews:", nrow(non_english_mystery), "\n")
+cat("Romance - Non-English reviews:", nrow(non_english_romance), "\n")
+
+```
+
+Mystery - Non-English reviews: 7685 
+Romance - Non-English reviews: 20151 
+
+
+I create a function to detect the true language with the OpenAI API, because many are misclassified
+
+```{r}
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(stringr)
+
+# Function to verify language with OpenAI
+verificar_idioma_openai <- function(df, text_column, start_idx, end_idx, api_key, model = "gpt-4o-mini") {
+  df$openai_language <- NA_character_  # new column to hold results
+  
+  for (i in start_idx:end_idx) {
+    texto <- df[[text_column]][i]
+
+    prompt <- paste0(
+      "Identify the language of the following text. Respond with only the language code (e.g., 'en' for English, 'es' for Spanish, etc.).\n\nTEXT:\n", texto
+    )
+
+    Sys.sleep(1.5)
+
+    res <- tryCatch({
+      POST(
+        url = "https://api.openai.com/v1/chat/completions",
+        add_headers(
+          Authorization = paste("Bearer", api_key),
+          `Content-Type` = "application/json"
+        ),
+        body = toJSON(list(
+          model = model,
+          messages = list(
+            list(role = "system", content = "You are a helpful assistant that detects language from short text."),
+            list(role = "user", content = prompt)
+          ),
+          temperature = 0
+        ), auto_unbox = TRUE)
+      )
+    }, error = function(e) {
+      cat("❌ Error at row", i, ":", e$message, "\n")
+      return(NULL)
+    })
+
+    if (!is.null(res) && status_code(res) == 200) {
+      content_parsed <- content(res, as = "parsed", encoding = "UTF-8")
+      lang_code <- tolower(str_trim(content_parsed$choices[[1]]$message$content))
+      df$openai_language[i] <- lang_code
+      cat("✔️", i, "→", lang_code, "\n")
+    } else {
+      df$openai_language[i] <- "error"
+      cat("⚠️ Failed at row", i, "\n")
+    }
+  }
+
+  return(df)
+}
+
+```
+
+API procedure:
+
+```{r}
+
+mi_api_key <- Sys.getenv("OPENAI_API_KEY")
+
+# Mystery dataset — analyze non-English only
+non_english_mystery_checked <- verificar_idioma_openai(
+  df = non_english_mystery,
+  text_column = "review_text",
+  start_idx = 1,
+  end_idx = nrow(non_english_mystery),
+  api_key = mi_api_key
+)
+
+
+```
+
+The romance dataset is twice as large, we set batches to control errors
+
+```{r}
+
+verificar_idioma_openai <- function(df, text_column, start_idx, end_idx, api_key, model = "gpt-4o-mini") {
+  df$openai_language <- NA_character_  # new column to hold results if not present
+
+  for (i in start_idx:end_idx) {
+    texto <- df[[text_column]][i]
+
+    # Skip if text is NA or empty
+    if (is.na(texto) || trimws(texto) == "") {
+      df$openai_language[i] <- "empty"
+      cat("⚠️ Skipped empty text at row", i, "\n")
+      next
+    }
+
+    prompt <- paste0(
+      "Identify the language of the following text. Respond with only the language code (e.g., 'en' for English, 'es' for Spanish, etc.).\n\nTEXT:\n", texto
+    )
+
+    Sys.sleep(1.5)  # Rate limit buffer
+
+    res <- tryCatch({
+      POST(
+        url = "https://api.openai.com/v1/chat/completions",
+        add_headers(
+          Authorization = paste("Bearer", api_key),
+          `Content-Type` = "application/json"
+        ),
+        body = toJSON(list(
+          model = model,
+          messages = list(
+            list(role = "system", content = "You are a helpful assistant that detects language from short text."),
+            list(role = "user", content = prompt)
+          ),
+          temperature = 0
+        ), auto_unbox = TRUE)
+      )
+    }, error = function(e) {
+      cat("❌ Error at row", i, ":", e$message, "\n")
+      cat("📝 Problematic text (row", i, "):", substr(texto, 1, 200), "...\n")  # print up to 200 chars
+      df$openai_language[i] <- "error"
+      return(NULL)
+    })
+
+    if (!is.null(res) && status_code(res) == 200) {
+      content_parsed <- content(res, as = "parsed", encoding = "UTF-8")
+      lang_code <- tolower(str_trim(content_parsed$choices[[1]]$message$content))
+      df$openai_language[i] <- lang_code
+      cat("✔️", i, "→", lang_code, "\n")
+    } else {
+      df$openai_language[i] <- "error"
+      cat("⚠️ Failed to process row", i, "— HTTP status:", if (!is.null(res)) status_code(res) else "N/A", "\n")
+      cat("📝 Problematic text (row", i, "):", substr(texto, 1, 200), "...\n")
+    }
+  }
+
+  return(df)
+}
+
+
+# Batch processing parameters
+batch_size <- 2500
+total_rows <- nrow(non_english_romance)
+batches <- split(non_english_romance, ceiling(seq_len(total_rows) / batch_size))
+
+# Store results
+all_results <- list()
+
+# Loop through batches
+for (i in seq_along(batches)) {
+  cat("🚀 Starting batch", i, "\n")
+  
+  batch_df <- batches[[i]]
+  
+  batch_result <- verificar_idioma_openai(
+    df = batch_df,
+    text_column = "review_text",
+    start_idx = 1,
+    end_idx = nrow(batch_df),
+    api_key = Sys.getenv("OPENAI_API_KEY"),
+    model = "gpt-4o"  # Or another model like "gpt-4" or "gpt-4o-mini"
+  )
+  
+  # Save intermediate result to disk
+  saveRDS(batch_result, file = paste0("openai_romance_batch_", i, ".rds"))
+  
+  # Store result in list
+  all_results[[i]] <- batch_result
+  
+  # Optional pause between batches
+  Sys.sleep(10)  # Adjust as needed
+}
+
+# Combine all batches when done
+non_english_romance_checked <- dplyr::bind_rows(all_results)
+
+# Save final combined dataset
+saveRDS(non_english_romance_checked, "romance_openai_language_results.rds")
+
+```
+
+(This part is separated from the previous one due to a halt in the API process, I could not do it all in one go, but it is essentially the same as before, just continuing)
+
+```{r}
+# Continue from batch 5
+start_batch <- 5
+
+# Redefine batches just to be sure
+batch_size <- 2500
+total_rows <- nrow(non_english_romance)
+batches <- split(non_english_romance, ceiling(seq_len(total_rows) / batch_size))
+
+# Resume processing
+for (i in start_batch:length(batches)) {
+  cat("🚀 Starting batch", i, "\n")
+  
+  batch_df <- batches[[i]]
+  
+  batch_result <- verificar_idioma_openai(
+    df = batch_df,
+    text_column = "review_text",
+    start_idx = 1,
+    end_idx = nrow(batch_df),
+    api_key = Sys.getenv("OPENAI_API_KEY"),
+    model = "gpt-4o"
+  )
+  
+  # Save and store results
+  saveRDS(batch_result, file = paste0("openai_romance_batch_", i, ".rds"))
+  all_results[[i]] <- batch_result
+  
+  Sys.sleep(10)
+}
+
+# Final combined result after all batches
+romance_openai_results <- dplyr::bind_rows(all_results)
+saveRDS(romance_openai_results, "romance_openai_language_results.rds")
+```
+
+Reading the batches I saved in the environment and then putting them together:
+```{r}
+batch_1 <- readRDS("openai_romance_batch_1.rds")
+batch_2 <- readRDS("openai_romance_batch_2.rds")
+batch_3 <- readRDS("openai_romance_batch_3.rds")
+batch_4 <- readRDS("openai_romance_batch_4.rds")
+
+non_english_romance_checked <- romance_openai_results
+
+```
+
+
+
+Now we see the differences between what we had and what openai said:
+
+```{r}
+# Compare OpenAI prediction with original detected language
+mystery_mismatch <- non_english_mystery_checked %>%
+  filter(openai_language == "en")
+
+romance_mismatch <- non_english_romance_checked %>%
+  filter(openai_language == "en")
+
+cat("❗ Mystery: Non-English reviews misclassified (actually English):", nrow(mystery_mismatch), "\n")
+cat("❗ Romance: Non-English reviews misclassified (actually English):", nrow(romance_mismatch), "\n")
+
+# Count combinations of (detected vs. actual)
+top_misclassifications <- mystery_mismatch %>%
+  count(detected_language, openai_language, sort = TRUE)
+
+# Count combinations of (detected vs. actual)
+top_misclassifications <- romance_mismatch %>%
+  count(detected_language, openai_language, sort = TRUE)
+
+print(top_misclassifications)
+
+```
+
+Mystery: Non-English reviews misclassified (actually English): 4443 
+Romance: Non-English reviews misclassified (actually English): 8953 
+
+
+Now I merge with the genderized dataset, only those rows that are truly English:
+
+```{r}
+
+#Merge OpenAI language results back into the full dataset using review_id
+mystery_merged <- mystery_with_gender %>%
+  left_join(
+    non_english_mystery_checked %>% select(review_id, openai_language),
+    by = "review_id"
+  )
+
+# Transform all entries containing the word "url" into just "url"
+mystery_merged <- mystery_merged %>%
+  mutate(openai_language = if_else(str_detect(str_to_lower(openai_language), "url"), "url", openai_language))
+
+
+#Keep only rows where OpenAI detected English or was not checked (i.e., NA)
+mystery_final <- mystery_merged %>%
+  filter(is.na(openai_language) | openai_language == "en")
+
+# Step 4: Optional - count rows kept vs. removed
+cat("🔍 Rows kept:", nrow(mystery_final), "\n")
+cat("🗑️ Rows removed (not English per OpenAI):", nrow(mystery_with_gender) - nrow(mystery_final), "\n")
+
+
+
+#Merge OpenAI language results back into the full dataset using review_id
+romance_merged <- romance_with_gender %>%
+  left_join(
+    non_english_romance_checked %>% select(review_id, openai_language),
+    by = "review_id"
+  )
+
+# Transform all entries containing the word "url" into just "url"
+romance_merged <- romance_merged %>%
+  mutate(openai_language = if_else(str_detect(str_to_lower(openai_language), "url"), "url", openai_language))
+
+
+#Keep only rows where OpenAI detected English or was not checked (i.e., NA)
+romance_final <- romance_merged %>%
+  filter(is.na(openai_language) | openai_language == "en")
+
+# Step 4: Optional - count rows kept vs. removed
+cat("🔍 Rows kept:", nrow(romance_final), "\n")
+cat("🗑️ Rows removed (not English per OpenAI):", nrow(romance_with_gender) - nrow(romance_final), "\n")
+
+```
+
+Rows kept in the Mystery dataset: 248860 
+Rows removed (not English per OpenAI): 11147
+
+Rows kept in the Romance dataset: 461304 
+ Rows removed (not English per OpenAI): 11198 
+
+
+I want to compute the Cohen kappa to see differences between original language and OpenAI's language:
+
+```{r}
+library(irr)
+
+# Keep only rows where detected_language is NOT 'en' and both values are non-NA
+filtered_langs <- mystery_merged %>%
+  filter(detected_language != "en", !is.na(detected_language), !is.na(openai_language)) %>%
+  select(detected_language, openai_language)
+# Cohen's Kappa for agreement between detected_language and openai_language
+kappa_result <- kappa2(filtered_langs, weight = "unweighted")
+
+print(kappa_result)
+
+# Keep only rows where detected_language is NOT 'en' and both values are non-NA
+filtered_langs_rm <- romance_merged %>%
+  filter(detected_language != "en", !is.na(detected_language), !is.na(openai_language)) %>%
+  select(detected_language, openai_language)
+# Cohen's Kappa for agreement between detected_language and openai_language
+kappa_result <- kappa2(filtered_langs_rm, weight = "unweighted")
+
+print(kappa_result)
+
+
+```
+
+With κ = 0.275, the agreement in Mystery between detected_language and openai_language is fair, but not strong. The two language detection systems disagree significantly.
+
+Since the p-value is 0, the result is statistically significant, meaning the agreement is unlikely due to chance—but it's still not high. The original classifier made notable errors.
+
+In Romance, the two methods of language detection agree reasonably well, but not perfectly. 
+
+It would have been ideal to be able to compare results with another dataset containing genderized names, but due to the impossibility of doing so, after considering OpenAI's output to be more trustworthy by manually checking, I decide to go with this method's language detection. 
+
+
+Confusion matrix:
+
+```{r}
+# Create a contingency table
+language_confusion <- table(
+  Detected = mystery_merged$detected_language,
+  OpenAI = mystery_merged$openai_language,
+  useNA = "ifany"
+)
+
+# View table
+print(language_confusion)
+
+```
+
+Now we create dataset *mystery_final and romance_final*, where we merge the two language columns: for those instances where detected_language was already "en", we keep those rows. If not, we keep only those that have "en" in openai_language. What we want in the end is to have just one column called "language" and it has to show "en" in all instances.
+
+```{r}
+library(dplyr)
+
+mystery_final <- mystery_merged %>%
+  filter(
+    detected_language == "en" | openai_language == "en"
+  ) %>%
+  mutate(language = "en") %>%
+  select(-detected_language, -openai_language)  # Remove the originals if no longer needed
+
+romance_final <- romance_merged %>%
+  filter(
+    detected_language == "en" | openai_language == "en"
+  ) %>%
+  mutate(language = "en") %>%
+  select(-detected_language, -openai_language)  # Remove the originals if no longer needed
+
+
+
+# Add last_name column to MYSTERY
+mystery_final <- mystery_final %>%
+  mutate(last_name = word(author, -1))
+
+# Add last_name column to ROMANCE
+romance_final <- romance_final %>%
+  mutate(last_name = word(author, -1))
+  relocate(last_name, .after = first_name)
+
+
+```
+
+mystery_final consists of 248860 observations, and romance_final, 446518 observations. 
+
+Both have the following 13 variables: title, title_series, author, description, pages, review_id, review_rating, review_text, first_name, last_name, gender, characters and language.
+
+These datasets are the ones that will be used for H1, and from which subset mystery_author_mentions and romance_author_mentions will be extracted for H2 and H3.
+
+
+
